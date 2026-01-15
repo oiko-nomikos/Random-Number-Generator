@@ -1,0 +1,24 @@
+BasedOnStyle: LLVM
+IndentWidth: 4
+UseTab: Never
+ColumnLimit: 180
+
+# Brace formatting
+BreakBeforeBraces: Attach
+
+# Keep one-line simple functions
+AllowShortFunctionsOnASingleLine: Inline
+
+# Prevent breaking constructor initializer lists
+ConstructorInitializerAllOnOneLineOrOnePerLine: false
+BreakConstructorInitializersBeforeComma: false
+
+# Do NOT reflow function parameters across multiple lines
+BinPackParameters: false
+BinPackArguments: false
+
+# Keep includes and using statements stable
+SortIncludes: false
+
+# Preserve empty lines and spacing where possible
+KeepEmptyLinesAtTheStartOfBlocks: true

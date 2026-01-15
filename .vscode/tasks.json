@@ -1,0 +1,40 @@
+{
+    "version": "2.0.0",
+    "tasks": [
+        {
+            "label": "Build Active C++ File (curl dynamic)",
+            "type": "process",
+            "command": "C:/msys64/ucrt64/bin/g++.exe",
+            "args": [
+                "-std=c++23",
+                "-Wall",
+                "-Wextra",
+                "-pthread",
+                "-g",
+                "-IC:/msys64/ucrt64/include",
+                "-IC:/msys64/ucrt64/include/curl",
+                "${file}",
+                "-o",
+                "${fileDirname}/${fileBasenameNoExtension}.exe",
+                "-LC:/msys64/ucrt64/lib",
+                "-lcurl",
+                "-lssl",
+                "-lcrypto"
+            ],
+            "options": {
+                "cwd": "${workspaceFolder}"
+            },
+            "group": {
+                "kind": "build",
+                "isDefault": true
+            },
+            "problemMatcher": ["$gcc"]
+        }
+    ]
+}
+
+
+
+
+
+
