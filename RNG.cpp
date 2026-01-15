@@ -379,11 +379,11 @@ int main() {
         info << "Throughput (Mbps): " << (bps / 1'000'000.0) << "\n";
     }
 
-    std::cout << "Done.\n";
+    std::cout << "\nDone.\n";
     std::cout << "Generated " << TOTAL_BITS << " bits\n";
     std::cout << "Time: " << durationMs << " ms\n";
 
-    std::cout << "Press enter to exit program.\n";
+    std::cout << "\nPress enter to exit program.\n";
 
     functions.pressEnterToContinue();
 
