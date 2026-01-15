@@ -328,7 +328,7 @@ class BinaryEntropyPool {
 
 int main() {
     RandomNumberGenerator rng;
-    BinaryEntropyPool bep; // max pool size
+    BinaryEntropyPool bep;
     Functions functions;
 
     std::cout << "Welcome to Oikos Entropy Generator!\n\n";
@@ -337,7 +337,7 @@ int main() {
     int amount;
     std::cin >> amount;
 
-    std::string entropy = bep.get(amount); // exactly 1000 bits
+    std::string entropy = bep.get(amount);
 
     std::cout << "Entropy: " << entropy << "\n";
 
