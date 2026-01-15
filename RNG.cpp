@@ -339,20 +339,47 @@ int main() {
 
     functions.pressEnterToContinue();
 
-    std::cout << "Downloading 10 million bits of entropy for the National Institute of Standards and Technology (NIST) - running statistical tests!\n";
+    std::cout << "Downloading 10 million bits of entropy...?\n";
+    std::cout << "Enter amount...\n";
 
-    constexpr size_t TOTAL_BITS = 10'000'000;
+    int TOTAL_BITS;
+    std::cin >> TOTAL_BITS;
 
-    std::ofstream out("entropy.bin");
-    if (!out) {
-        std::cerr << "Failed to open output file\n";
-        return 1;
+    std::cout << "Output: entropy.bin, comes equiped with a metadata file\n";
+    std::cout << "You can use this file to run statistical tests for The National Institute of Standards and Technology (NIST)\n";
+
+    auto start = std::chrono::steady_clock::now();
+
+    std::string insaneEntropy = bep.get(TOTAL_BITS);
+
+    auto end = std::chrono::steady_clock::now();
+    auto durationMs = std::chrono::duration_cast<std::chrono::milliseconds>(end - start).count();
+
+    // Write raw entropy (NIST input)
+    {
+        std::ofstream out("entropy.bin", std::ios::binary);
+        out << insaneEntropy;
     }
 
-    std::string insaneAmountOfEntropy = bep.get(TOTAL_BITS);
-    out << insaneAmountOfEntropy;
+    // Write metadata
+    {
+        std::ofstream info("entropy_info.txt");
+        double seconds = durationMs / 1000.0;
+        double bps = TOTAL_BITS / seconds;
 
+        info << "Oikos Entropy Generator\n";
+        info << "Bits generated: " << TOTAL_BITS << "\n";
+        info << "Time (ms): " << durationMs << "\n";
+        info << "Time (s): " << seconds << "\n";
+        info << "Throughput (bits/sec): " << bps << "\n";
+        info << "Throughput (Mbps): " << (bps / 1'000'000.0) << "\n";
+    }
+
+    std::cout << "Done.\n";
     std::cout << "Generated " << TOTAL_BITS << " bits\n";
+    std::cout << "Time: " << durationMs << " ms\n";
+
+    std::cout << "Press enter to exit program.\n";
 
     functions.pressEnterToContinue();
 
