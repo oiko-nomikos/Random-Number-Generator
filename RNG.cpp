@@ -30,6 +30,7 @@
 //----------------------------------------------------------------------------------
 
 // === Core C++ Input/Output and Strings ===
+#include <fstream>  // std::ifstream, std::ofstream — file I/O
 #include <iostream> // std::cout, std::cin — console I/O
 #include <string>   // std::string — string handling
 #include <iomanip>  // std::setw, std::setprecision — formatted output
@@ -335,6 +336,23 @@ int main() {
     std::string entropy = bep.get(amount); // exactly 1000 bits
 
     std::cout << "Entropy: " << entropy << "\n";
+
+    functions.pressEnterToContinue();
+
+    std::cout << "Downloading 10 million bits of entropy for the National Institute of Standards and Technology (NIST) - running statistical tests!\n";
+
+    constexpr size_t TOTAL_BITS = 10'000'000;
+
+    std::ofstream out("entropy.bin");
+    if (!out) {
+        std::cerr << "Failed to open output file\n";
+        return 1;
+    }
+
+    std::string insaneAmountOfEntropy = bep.get(TOTAL_BITS);
+    out << insaneAmountOfEntropy;
+
+    std::cout << "Generated " << TOTAL_BITS << " bits\n";
 
     functions.pressEnterToContinue();
 
