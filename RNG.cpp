@@ -225,16 +225,6 @@ class SHA256 {
 //----------------------------------------------------------------------------------
 //----------------------------------------------------------------------------------
 
-inline std::string sha256Binary(const std::string &data) {
-    CRYPTO::SHA256 sha;
-    sha.update(data);
-    return sha.digestBinary(); // directly returns 256-bit binary string
-}
-
-//----------------------------------------------------------------------------------
-//----------------------------------------------------------------------------------
-//----------------------------------------------------------------------------------
-
 class RandomNumberGenerator {
   public:
     inline std::string run() {
@@ -285,14 +275,18 @@ class RandomNumberGenerator {
     }
 
     inline std::string hashLocalBits() {
+        // Build 64-byte block
         uint8_t bytes[64] = {0};
         for (size_t i = 0; i < localBits.size(); ++i) {
             if (localBits[i]) {
                 bytes[i / 8] |= (1 << (7 - (i % 8)));
             }
         }
-        std::string byteString(reinterpret_cast<char *>(bytes), 64);
-        return sha256Binary(byteString);
+
+        sha.update(bytes, 64);
+
+        // Return 256-bit binary string using fast helper
+        return sha.digestBinary();
     }
 };
 
@@ -302,21 +296,12 @@ class RandomNumberGenerator {
 
 class BinaryEntropyPool {
   public:
-    BinaryEntropyPool(size_t maxBits = 10000) : maxPoolSize(maxBits) {}
-
-    std::string get(size_t bitsNeeded) {
+    inline std::string get(size_t bitsNeeded) {
         std::lock_guard<std::mutex> lock(poolMutex);
 
-        // Refill the pool until we have enough bits, but never exceed maxPoolSize
-        while (bitPool.size() < bitsNeeded && bitPool.size() < maxPoolSize) {
-            std::string newBits = rng.run();
-
-            // Only add as many bits as will fit
-            if (bitPool.size() + newBits.size() > maxPoolSize) {
-                newBits = newBits.substr(0, maxPoolSize - bitPool.size());
-            }
-
-            bitPool += newBits;
+        // Refill the pool until we have enough bits
+        while (bitPool.size() < bitsNeeded) {
+            bitPool += rng.run(); // rng.run() now returns a bit string
         }
 
         // Extract exactly the number of bits requested
@@ -330,7 +315,6 @@ class BinaryEntropyPool {
     std::string bitPool; // bit string directly
     RandomNumberGenerator rng;
     mutable std::mutex poolMutex;
-    size_t maxPoolSize;
 };
 
 //----------------------------------------------------------------------------------
@@ -339,16 +323,20 @@ class BinaryEntropyPool {
 
 int main() {
     RandomNumberGenerator rng;
-    BinaryEntropyPool bep;
+    BinaryEntropyPool bep; // max pool size
     Functions functions;
 
+    std::cout << "Welcome to Oikos Entropy Generator!\n\n";
+    std::cout << "Please enter the amount of entropy you wish to Generate!\n";
+
+    int amount;
+    std::cin >> amount;
+
+    std::string entropy = bep.get(amount); // exactly 1000 bits
+
+    std::cout << "Entropy: " << entropy << "\n";
+
     functions.pressEnterToContinue();
-
-    rng.run();
-
-    std::string oneBitOfEntropy = bep.get(1);
-
-    std::cout << "One bit of entrpy: " << oneBitOfEntropy;
 
     return 0;
 }
