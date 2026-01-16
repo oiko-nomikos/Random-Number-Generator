@@ -383,9 +383,8 @@ int main() {
     std::cout << "Generated " << TOTAL_BITS << " bits\n";
     std::cout << "Time: " << durationMs << " ms\n";
 
-    std::cout << "\nPress enter to exit program.\n";
-
-    functions.pressEnterToContinue();
+    std::cout << "\nProgram finished. Press Enter to exit..." << std::endl;
+    std::cin.get();
 
     return 0;
 }
