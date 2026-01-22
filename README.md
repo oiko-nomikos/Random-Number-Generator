@@ -1,136 +1,44 @@
-Oikos Entropy Generator (C++)
+# Oikos Entropy Generator
 
-A from-scratch entropy and random bit generator written in modern C++ (C++23), using high-resolution timing jitter and SHA-256 whitening to produce configurable amounts of binary entropy.
+**A from-first-principles, self-contained randomness extractor using CPU timing jitter.**
 
-This project is intentionally self-contained, with no external crypto or RNG libraries, and is designed as an educational and experimental entropy pipeline rather than a drop-in replacement for OS CSPRNGs.
+This is an educational C++ (C++23) project that demonstrates how to harvest entropy from **tiny execution-time variations** in a simple loop — without any OS-provided randomness APIs, hardware RNGs, or external cryptographic libraries.
 
-✨ Features
+The core innovation is a custom **timing-jitter bit extractor** combined with a **thread-safe entropy pool** and SHA-256 whitening — all built from scratch.
 
-⏱️ Timing-based entropy source
+**This is NOT cryptographically secure randomness.**  
+It is a teaching tool to understand entropy collection mechanics.
 
-Uses nanosecond-resolution timing jitter as the raw entropy signal
+## Features
 
-🔐 SHA-256 whitening
+- Pure software-based entropy source: measures nanosecond-level jitter in a trivial countdown loop  
+- Real-time debiasing via running average comparison  
+- Sliding-window collection (512 bits) → SHA-256 whitening → 256-bit uniform chunks  
+- On-demand, thread-safe entropy pool (`BinaryEntropyPool`)  
+- Standalone SHA-256 implementation (no OpenSSL/libcrypto dependency)  
+- Configurable output: request any number of bits  
+- Nondeterministic behavior: different runs produce different output due to real-world timing variance  
+- Single-file implementation (RNG.cpp) for easy study
 
-Custom SHA-256 implementation (no OpenSSL / libsodium)
+## Architecture & How It Works
 
-Converts noisy entropy into uniformly distributed output
+### 1. SystemClock
+High-resolution timing using `std::chrono::system_clock` (nanoseconds).
 
-🧠 Sliding window entropy extraction
+### 2. SHA256 (in CRYPTO namespace)
+Independent streaming implementation following NIST FIPS 180-4 — used solely for whitening the raw jitter bits.
 
-512-bit local buffer hashed into 256-bit outputs
+### 3. RandomNumberGenerator — The Core Entropy Harvester (your main invention)
 
-🧵 Thread-safe entropy pool
+**Entropy source**  
+Measures execution time of a tiny loop:
 
-std::mutex-protected entropy pool
-
-Supports concurrent access
-
-📏 User-configurable entropy size
-
-Generate any number of bits at runtime
-
-🧪 Deterministic structure, nondeterministic output
-
-Same code path, different entropy every run
-
-⚠️ Disclaimer
-
-This project is for educational and experimental purposes.
-It is not audited, not certified, and not recommended for production cryptographic use where security guarantees are required. 
-
-If you need cryptographically secure randomness in production, use your OS-provided CSPRNG (e.g. /dev/urandom, CryptGenRandom, getrandom()).
-
-🧩 Architecture Overview
-1. SystemClock
-
-Provides high-resolution timestamps (seconds → nanoseconds) used for timing jitter.
-
-2. SHA256
-
-A complete, standalone implementation of SHA-256:
-
-Supports streaming updates
-
-Outputs hex or 256-bit binary strings
-
-Used exclusively for entropy whitening
-
-3. RandomNumberGenerator
-
-Measures execution-time jitter
-
-Converts timing variance into raw bits
-
-Maintains a 512-bit sliding window
-
-Hashes each window into a 256-bit binary output
-
-4. BinaryEntropyPool
-
-Accumulates entropy from the RNG
-
-Stores entropy as a binary string
-
-Thread-safe via std::mutex
-
-Supplies exactly the number of bits requested
-
-🚀 Usage
-Build (MSYS2 / MinGW example)
-g++ -std=c++23 -Wall -Wextra -pthread RNG.cpp - seen. exe
-
-
-(Adjust paths/compiler as needed.)
-
-Run
-Welcome to Oikos Entropy Generator!
-
-Please enter the amount of entropy you wish to Generate!
-1000
-
-Entropy: 011010100101...
-
-
-The output is a binary string of exactly the requested length.
-
-📦 Example Code
-BinaryEntropyPool bep;
-
-size_t bits = 1024;
-std::string entropy = bep.get(bits);
-
-// entropy.size() == 1024
-
-📈 Performance Notes
-
-Entropy generation speed depends on CPU timing resolution
-
-SHA-256 whitening dominates runtime cost
-
-Larger entropy requests scale linearly
-
-🛠️ Possible Extensions
-
-Hex / Base64 output modes
-
-Entropy estimation metrics
-
-Persistent entropy pool (disk-backed)
-
-UUID / mnemonic / key generation
-
-Multithreaded entropy harvesting
-
-Statistical randomness testing (NIST STS)
-
-📜 License
-
-MIT License
-Copyright © 2026 oiko-nomikos
-
-See the LICENSE file or header comments for full license text.
-
+```cpp
+int x = 10;
+auto start = systemClock.getNanoseconds();
+while (x > 0) x--;
+auto end = systemClock.getNanoseconds();
+long long duration = end - start;
 👤 Author
 
 oiko-nomikos
