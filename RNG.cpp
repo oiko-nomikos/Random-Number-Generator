@@ -40,59 +40,64 @@
 //
 // All other parts of this program — including:
 //
-//   • Timing-based entropy collection & randomness pool
+//   • Random Number Generator
+//   • Binary Entropy Pool
 //
 //   — are original work by oiko-nomikos.
 //
 // CRITICAL WARNING:
 // ---------------------------------------------------------------------------------
 // THIS IS NOT PRODUCTION-GRADE CRYPTOGRAPHY.
-// These implementations have NOT been audited, formally verified, side-channel
-// protected, or tested against real-world attacks.
-// Using this code for anything security-sensitive (real passwords, real data,
-// financial information, etc.) is extremely dangerous and strongly discouraged.
 //
-// Use only for learning, experimentation, or CTF-style challenges.
-// For anything important, use well-audited libraries such as:
-//   OpenSSL, libsodium, cryptography (Python), Bouncy Castle, etc.
+// Discretion  must be given - use at own risk!
 //
 // If you find a bug or weakness — please report it responsibly.
-// ---------------------------------------------------------------------------------
 //
 //----------------------------------------------------------------------------------
 //----------------------------------------------------------------------------------
 //----------------------------------------------------------------------------------
 
-// === Core C++ Input/Output and Strings ===
-#include <fstream>  // std::ifstream, std::ofstream — file I/O
-#include <iostream> // std::cout, std::cin — console I/O
-#include <string>   // std::string — string handling
-#include <iomanip>  // std::setw, std::setprecision — formatted output
-
-// === Containers and Data Structures ===
-#include <vector> // std::vector — dynamic arrays
-#include <deque>  // std::deque — double-ended queues (used for entropy pools)
-
-// === Timing and Delays ===
-#include <chrono> // std::chrono::high_resolution_clock — precise timing
-
-// === Multithreading and Synchronization ===
-#include <mutex> // std::mutex — mutual exclusion
-
 //----------------------------------------------------------------------------------
-//----------------------------------------------------------------------------------
+// Core C++ Input/Output and Strings
 //----------------------------------------------------------------------------------
 
-class Functions {
-  public:
-    // Put this function somewhere in your code
-    void pressEnterToContinue() {
-        std::cout << "\nPress Enter to continue...\n";
-        std::cin.clear(); // in case of previous input errors
-        std::cin.ignore(std::numeric_limits<std::streamsize>::max(), '\n');
-        std::cin.get(); // wait for one more newline (Enter)
-    }
-};
+#include <fstream>  // std::ifstream, std::ofstream — file input/output
+#include <iostream> // std::cout, std::cin, std::cerr — console input/output
+#include <string>   // std::string — dynamic string class
+#include <iomanip>  // std::setw, std::setfill, std::setprecision — formatted output
+#include <limits>   // std::numeric_limits — type limits and stream buffer utilities
+
+//----------------------------------------------------------------------------------
+// Containers and Data Structures
+//----------------------------------------------------------------------------------
+
+#include <vector> // std::vector — dynamic contiguous array
+#include <deque>  // std::deque — double-ended queue with fast front/back insertion
+
+//----------------------------------------------------------------------------------
+// Timing
+//----------------------------------------------------------------------------------
+
+#include <chrono> // std::chrono — clocks, durations, and time measurements
+
+//----------------------------------------------------------------------------------
+// Thread Synchronisation
+//----------------------------------------------------------------------------------
+
+#include <mutex> // std::mutex, std::lock_guard, std::unique_lock — thread synchronisation
+
+//----------------------------------------------------------------------------------
+// Windows API
+//----------------------------------------------------------------------------------
+
+#define WIN32_LEAN_AND_MEAN // Exclude rarely used Windows headers to reduce compile time
+#include <windows.h>        // Windows API (VirtualLock, VirtualUnlock, Sleep, etc.)
+
+//----------------------------------------------------------------------------------
+// Global Type Aliases
+//----------------------------------------------------------------------------------
+
+using Bytes = std::vector<uint8_t>; // Convenience alias for a byte buffer
 
 //----------------------------------------------------------------------------------
 //----------------------------------------------------------------------------------
@@ -100,23 +105,8 @@ class Functions {
 
 class SystemClock {
   public:
-    inline long long getSeconds() {
-        auto now = std::chrono::system_clock::now();
-        return std::chrono::duration_cast<std::chrono::seconds>(now.time_since_epoch()).count();
-    }
-
-    inline long long getMilliseconds() {
-        auto now = std::chrono::system_clock::now();
-        return std::chrono::duration_cast<std::chrono::milliseconds>(now.time_since_epoch()).count();
-    }
-
-    inline long long getMicroseconds() {
-        auto now = std::chrono::system_clock::now();
-        return std::chrono::duration_cast<std::chrono::microseconds>(now.time_since_epoch()).count();
-    }
-
     inline long long getNanoseconds() {
-        auto now = std::chrono::system_clock::now();
+        auto now = std::chrono::high_resolution_clock::now();
         return std::chrono::duration_cast<std::chrono::nanoseconds>(now.time_since_epoch()).count();
     }
 };
@@ -130,7 +120,48 @@ class SHA256 {
   public:
     SHA256() { reset(); }
 
-    void update(const uint8_t *data, size_t len) {
+    // clang format off
+    // ------------------------------------------------------------
+    // Input: {0x48, 0x65, 0x6C, 0x6C, 0x6F}
+    // Output: {0x2C, 0xF2, 0x4D, 0xBA, ...}
+    // Useful for: HMAC, key derivation, checksums, binary protocols
+    // ------------------------------------------------------------
+    inline Bytes hashBytes(const Bytes &data) {
+        update(data.data(), data.size());
+        return digestBytes();
+    }
+
+    // ------------------------------------------------------------
+    // Input: "hello"
+    // Output: {0x2C, 0xF2, 0x4D, 0xBA, ...}
+    // Useful when: You need the hash in hex (prefix "0x") for further processing
+    // ------------------------------------------------------------
+    inline Bytes hashString(const std::string &data) {
+        update(reinterpret_cast<const uint8_t *>(data.data()), data.size());
+        return digestBytes();
+    }
+
+    // ------------------------------------------------------------
+    // Input: "hello"
+    // Output: "00101100111100100100110110111010..."
+    // Useful for: Entropy pools, mnemonic generation, bit manipulation, debugging
+    // ------------------------------------------------------------
+    inline std::string hashBinary(const std::string &data) {
+        update(reinterpret_cast<const uint8_t *>(data.data()), data.size());
+        return digestBinary();
+    }
+
+    // ------------------------------------------------------------
+    // Input: "hello"
+    // Output: "1b161e5c1fa7425e73043362938b9824"
+    // Useful for: Transaction IDs, fingerprints, certificates, wallet identifiers, logging and display
+    // ------------------------------------------------------------
+    inline std::string hashHex(const std::string &data) {
+        update(reinterpret_cast<const uint8_t *>(data.data()), data.size());
+        return digest();
+    }
+
+    inline void update(const uint8_t *data, size_t len) {
         for (size_t i = 0; i < len; ++i) {
             buffer[bufferLen++] = data[i];
             if (bufferLen == 64) {
@@ -140,10 +171,9 @@ class SHA256 {
             }
         }
     }
+    // clang format on
 
-    void update(const std::string &data) { update(reinterpret_cast<const uint8_t *>(data.c_str()), data.size()); }
-
-    std::string digest() {
+    inline std::string digest() {
         uint64_t totalBits = bitlen + bufferLen * 8;
 
         buffer[bufferLen++] = 0x80;
@@ -170,7 +200,16 @@ class SHA256 {
         return oss.str();
     }
 
-    std::string digestBinary() {
+    inline Bytes digestBytes() {
+        std::string hex = digest();
+        Bytes out;
+        out.reserve(32);
+        for (size_t i = 0; i < hex.size(); i += 2)
+            out.push_back(static_cast<uint8_t>(std::stoul(hex.substr(i, 2), nullptr, 16)));
+        return out;
+    }
+
+    inline std::string digestBinary() {
         std::string hex = digest();
         std::string binary;
         for (char c : hex) {
@@ -181,26 +220,27 @@ class SHA256 {
         return binary;
     }
 
-    void reset() {
-        h[0] = 0x6a09e667;
-        h[1] = 0xbb67ae85;
-        h[2] = 0x3c6ef372;
-        h[3] = 0xa54ff53a;
-        h[4] = 0x510e527f;
-        h[5] = 0x9b05688c;
-        h[6] = 0x1f83d9ab;
-        h[7] = 0x5be0cd19;
-        bitlen = 0;
+    inline void reset() {
+        h[0]      = 0x6a09e667;
+        h[1]      = 0xbb67ae85;
+        h[2]      = 0x3c6ef372;
+        h[3]      = 0xa54ff53a;
+        h[4]      = 0x510e527f;
+        h[5]      = 0x9b05688c;
+        h[6]      = 0x1f83d9ab;
+        h[7]      = 0x5be0cd19;
+        bitlen    = 0;
         bufferLen = 0;
     }
 
   private:
+    static constexpr const char *CLASS_NAME = "SHA256";
     uint32_t h[8];
     uint64_t bitlen;
     uint8_t buffer[64];
     size_t bufferLen;
 
-    void transform(const uint8_t block[64]) {
+    inline void transform(const uint8_t block[64]) {
         uint32_t w[64];
 
         for (int i = 0; i < 16; ++i) {
@@ -211,26 +251,26 @@ class SHA256 {
             w[i] = theta1(w[i - 2]) + w[i - 7] + theta0(w[i - 15]) + w[i - 16];
         }
 
-        uint32_t a = h[0];
-        uint32_t b = h[1];
-        uint32_t c = h[2];
-        uint32_t d = h[3];
-        uint32_t e = h[4];
-        uint32_t f = h[5];
-        uint32_t g = h[6];
+        uint32_t a     = h[0];
+        uint32_t b     = h[1];
+        uint32_t c     = h[2];
+        uint32_t d     = h[3];
+        uint32_t e     = h[4];
+        uint32_t f     = h[5];
+        uint32_t g     = h[6];
         uint32_t h_val = h[7];
 
         for (int i = 0; i < 64; ++i) {
             uint32_t temp1 = h_val + sig1(e) + choose(e, f, g) + K[i] + w[i];
             uint32_t temp2 = sig0(a) + majority(a, b, c);
-            h_val = g;
-            g = f;
-            f = e;
-            e = d + temp1;
-            d = c;
-            c = b;
-            b = a;
-            a = temp1 + temp2;
+            h_val          = g;
+            g              = f;
+            f              = e;
+            e              = d + temp1;
+            d              = c;
+            c              = b;
+            b              = a;
+            a              = temp1 + temp2;
         }
 
         h[0] += a;
@@ -243,20 +283,20 @@ class SHA256 {
         h[7] += h_val;
     }
 
-    static uint32_t rotr(uint32_t x, uint32_t n) { return (x >> n) | (x << (32 - n)); }
-    static uint32_t choose(uint32_t e, uint32_t f, uint32_t g) { return (e & f) ^ (~e & g); }
-    static uint32_t majority(uint32_t a, uint32_t b, uint32_t c) { return (a & b) ^ (a & c) ^ (b & c); }
-    static uint32_t sig0(uint32_t x) { return rotr(x, 2) ^ rotr(x, 13) ^ rotr(x, 22); }
-    static uint32_t sig1(uint32_t x) { return rotr(x, 6) ^ rotr(x, 11) ^ rotr(x, 25); }
-    static uint32_t theta0(uint32_t x) { return rotr(x, 7) ^ rotr(x, 18) ^ (x >> 3); }
-    static uint32_t theta1(uint32_t x) { return rotr(x, 17) ^ rotr(x, 19) ^ (x >> 10); }
+    inline static uint32_t rotr(uint32_t x, uint32_t n) { return (x >> n) | (x << (32 - n)); }
+    inline static uint32_t choose(uint32_t e, uint32_t f, uint32_t g) { return (e & f) ^ (~e & g); }
+    inline static uint32_t majority(uint32_t a, uint32_t b, uint32_t c) { return (a & b) ^ (a & c) ^ (b & c); }
+    inline static uint32_t sig0(uint32_t x) { return rotr(x, 2) ^ rotr(x, 13) ^ rotr(x, 22); }
+    inline static uint32_t sig1(uint32_t x) { return rotr(x, 6) ^ rotr(x, 11) ^ rotr(x, 25); }
+    inline static uint32_t theta0(uint32_t x) { return rotr(x, 7) ^ rotr(x, 18) ^ (x >> 3); }
+    inline static uint32_t theta1(uint32_t x) { return rotr(x, 17) ^ rotr(x, 19) ^ (x >> 10); }
 
-    const uint32_t K[64] = {0x428a2f98, 0x71374491, 0xb5c0fbcf, 0xe9b5dba5, 0x3956c25b, 0x59f111f1, 0x923f82a4, 0xab1c5ed5, 0xd807aa98, 0x12835b01, 0x243185be,
-                            0x550c7dc3, 0x72be5d74, 0x80deb1fe, 0x9bdc06a7, 0xc19bf174, 0xe49b69c1, 0xefbe4786, 0x0fc19dc6, 0x240ca1cc, 0x2de92c6f, 0x4a7484aa,
-                            0x5cb0a9dc, 0x76f988da, 0x983e5152, 0xa831c66d, 0xb00327c8, 0xbf597fc7, 0xc6e00bf3, 0xd5a79147, 0x06ca6351, 0x14292967, 0x27b70a85,
-                            0x2e1b2138, 0x4d2c6dfc, 0x53380d13, 0x650a7354, 0x766a0abb, 0x81c2c92e, 0x92722c85, 0xa2bfe8a1, 0xa81a664b, 0xc24b8b70, 0xc76c51a3,
-                            0xd192e819, 0xd6990624, 0xf40e3585, 0x106aa070, 0x19a4c116, 0x1e376c08, 0x2748774c, 0x34b0bcb5, 0x391c0cb3, 0x4ed8aa4a, 0x5b9cca4f,
-                            0x682e6ff3, 0x748f82ee, 0x78a5636f, 0x84c87814, 0x8cc70208, 0x90befffa, 0xa4506ceb, 0xbef9a3f7, 0xc67178f2};
+    inline static constexpr uint32_t K[64] = {0x428a2f98, 0x71374491, 0xb5c0fbcf, 0xe9b5dba5, 0x3956c25b, 0x59f111f1, 0x923f82a4, 0xab1c5ed5, 0xd807aa98, 0x12835b01, 0x243185be,
+                                              0x550c7dc3, 0x72be5d74, 0x80deb1fe, 0x9bdc06a7, 0xc19bf174, 0xe49b69c1, 0xefbe4786, 0x0fc19dc6, 0x240ca1cc, 0x2de92c6f, 0x4a7484aa,
+                                              0x5cb0a9dc, 0x76f988da, 0x983e5152, 0xa831c66d, 0xb00327c8, 0xbf597fc7, 0xc6e00bf3, 0xd5a79147, 0x06ca6351, 0x14292967, 0x27b70a85,
+                                              0x2e1b2138, 0x4d2c6dfc, 0x53380d13, 0x650a7354, 0x766a0abb, 0x81c2c92e, 0x92722c85, 0xa2bfe8a1, 0xa81a664b, 0xc24b8b70, 0xc76c51a3,
+                                              0xd192e819, 0xd6990624, 0xf40e3585, 0x106aa070, 0x19a4c116, 0x1e376c08, 0x2748774c, 0x34b0bcb5, 0x391c0cb3, 0x4ed8aa4a, 0x5b9cca4f,
+                                              0x682e6ff3, 0x748f82ee, 0x78a5636f, 0x84c87814, 0x8cc70208, 0x90befffa, 0xa4506ceb, 0xbef9a3f7, 0xc67178f2};
 };
 } // namespace CRYPTO
 
@@ -267,11 +307,21 @@ class SHA256 {
 class RandomNumberGenerator {
   public:
     inline std::string run() {
+        const size_t producingIterations = totalIterations - localBufferSize;
+        const size_t expectedBits        = producingIterations * total;
+
         std::string result;
-        result.reserve((totalIterations - localBufferSize) * 256);
+        result.reserve(expectedBits);
+
+        // reset state
+        head      = 0;
+        tail      = 0;
+        count     = 0;
+        filled    = false;
+        globalSum = 0;
+        globalAvg = 0;
 
         for (int i = 0; i < totalIterations; ++i) {
-
             long long duration = countdown();
             ++count;
             globalSum += duration;
@@ -279,15 +329,14 @@ class RandomNumberGenerator {
 
             int bit = duration < globalAvg ? 0 : 1;
 
-            if (localBits.size() >= localBufferSize)
-                localBits.pop_front();
+            localBits[tail] = bit;
+            tail            = (tail + 1) % localBufferSize;
 
-            localBits.push_back(bit);
+            if (!filled && tail == localBufferSize - 1)
+                filled = true;
 
-            if (localBits.size() == localBufferSize) {
-                // 32 raw bytes → 256 bit string
-                std::string hashBits = hashLocalBits();
-                result += hashBits;
+            if (filled) {
+                result += hashLocalBits();
             }
         }
 
@@ -295,36 +344,45 @@ class RandomNumberGenerator {
     }
 
   private:
+    static constexpr const char *CLASS_NAME = "RandomNumberGenerator";
     CRYPTO::SHA256 sha;
     SystemClock systemClock;
-    std::deque<int> localBits;
-    const int totalIterations = 1000;
-    const size_t localBufferSize = 512;
-    long long globalSum = 0;
-    long long globalAvg = 0;
-    int count = 0;
+
+    static constexpr int totalIterations    = 1024;
+    static constexpr size_t localBufferSize = 512;
+    static constexpr size_t total           = 256;
+    static constexpr int byte64             = 64;
+
+    std::array<int, localBufferSize> localBits = {};
+    size_t head                                = 0;
+    size_t tail                                = 0;
+    bool filled                                = false;
+    long long globalSum                        = 0;
+    long long globalAvg                        = 0;
+    int count                                  = 0;
 
     inline long long countdown() {
-        int x = 10;
-        auto start = systemClock.getNanoseconds();
-        while (x > 0)
-            x--;
-        auto end = systemClock.getNanoseconds();
-        return end - start;
+        volatile int x = 10;
+        auto start     = systemClock.getNanoseconds();
+        while (x > 0) {
+            int tmp = x;
+            x       = tmp - 1;
+        }
+        return systemClock.getNanoseconds() - start;
     }
 
     inline std::string hashLocalBits() {
-        // Build 64-byte block
         uint8_t bytes[64] = {0};
-        for (size_t i = 0; i < localBits.size(); ++i) {
-            if (localBits[i]) {
+
+        for (size_t i = 0; i < localBufferSize; ++i) {
+            size_t idx = (head + i) % localBufferSize;
+            if (localBits[idx]) {
                 bytes[i / 8] |= (1 << (7 - (i % 8)));
             }
         }
 
-        sha.update(bytes, 64);
+        sha.update(bytes, byte64);
 
-        // Return 256-bit binary string using fast helper
         return sha.digestBinary();
     }
 };
@@ -335,25 +393,113 @@ class RandomNumberGenerator {
 
 class BinaryEntropyPool {
   public:
+    BinaryEntropyPool() {
+        bitPool.reserve(POOL_RESERVED); // reserve 200% upfront
+        lockMemory();
+        // refill();
+    }
+
+    ~BinaryEntropyPool() {
+        drain();
+        unlockMemory();
+    }
+
     inline std::string get(size_t bitsNeeded) {
         std::lock_guard<std::mutex> lock(poolMutex);
 
-        // Refill the pool until we have enough bits
-        while (bitPool.size() < bitsNeeded) {
-            bitPool += rng.run(); // rng.run() now returns a bit string
-        }
+        if (bitPool.size() < LOW_WATERMARK)
+            refill();
+        while (bitPool.size() < bitsNeeded)
+            refill();
 
-        // Extract exactly the number of bits requested
         std::string result = bitPool.substr(0, bitsNeeded);
-        bitPool.erase(0, bitsNeeded); // remove consumed bits
+        secureErase(bitsNeeded);
 
         return result;
     }
 
+    inline std::string getLarge(size_t bitsNeeded) {
+        std::string result;
+        result.reserve(bitsNeeded);
+
+        size_t remaining = bitsNeeded;
+
+        while (remaining > 0) {
+            size_t chunkSize = std::min(remaining, POOL_CAPACITY);
+            result += get(chunkSize);
+            remaining -= chunkSize;
+        }
+
+        return result;
+    }
+
+    inline size_t available() const {
+        std::lock_guard<std::mutex> lock(poolMutex);
+        return bitPool.size();
+    }
+
+    inline void drain() {
+        std::lock_guard<std::mutex> lock(poolMutex);
+        secureClear(bitPool);
+        bitPool.reserve(POOL_CAPACITY);
+    }
+
   private:
-    std::string bitPool; // bit string directly
     RandomNumberGenerator rng;
+
+    static constexpr const char *CLASS_NAME = "BinaryEntropyPool";
+    static constexpr size_t POOL_CAPACITY   = 512 * 256;         // 131,072 bits — one rng.run()
+    static constexpr size_t POOL_RESERVED   = POOL_CAPACITY * 2; // 262,144 bits — 200%
+    static constexpr size_t LOW_WATERMARK   = 512 * 128;         // refill below halfway
+
+    std::string bitPool;
     mutable std::mutex poolMutex;
+
+    inline std::vector<std::string> getChunked(size_t bitsNeeded) {
+        std::vector<std::string> chunks;
+
+        size_t remaining = bitsNeeded;
+
+        while (remaining > 0) {
+            size_t chunkSize = std::min(remaining, POOL_CAPACITY);
+            chunks.push_back(get(chunkSize));
+            remaining -= chunkSize;
+        }
+
+        return chunks;
+    }
+
+    inline void refill() { bitPool += rng.run(); }
+
+    inline void secureClear(std::string &s) {
+        volatile char *p = s.data();
+        for (size_t i = 0; i < s.size(); ++i)
+            p[i] = 0;
+        s.clear();
+    }
+
+    inline void secureErase(size_t n) {
+        volatile char *p = bitPool.data();
+        for (size_t i = 0; i < n; ++i)
+            p[i] = 0;
+        bitPool.erase(0, n);
+    }
+
+    inline void lockMemory() {
+#ifdef _WIN32
+        VirtualLock(bitPool.data(), POOL_RESERVED);
+#else
+        mlock(bitPool.data(), POOL_RESERVED);
+#endif
+    }
+
+    inline void unlockMemory() {
+#ifdef _WIN32
+        VirtualUnlock(bitPool.data(), POOL_CAPACITY);
+#else
+        munlock(bitPool.data(), POOL_CAPACITY);
+#endif
+    }
 };
 
 //----------------------------------------------------------------------------------
@@ -363,50 +509,38 @@ class BinaryEntropyPool {
 int main() {
     RandomNumberGenerator rng;
     BinaryEntropyPool bep;
-    Functions functions;
 
     std::cout << "Welcome to Oikos Entropy Generator!\n\n";
     std::cout << "Please enter the amount of entropy you wish to Generate!\n";
 
     int amount;
     std::cin >> amount;
-
-    std::string entropy = bep.get(amount);
-
-    std::cout << "Entropy: " << entropy << "\n";
-
-    functions.pressEnterToContinue();
-
-    std::cout << "Downloading 10 million bits of entropy...?\n";
-    std::cout << "Enter amount...\n";
-
-    int TOTAL_BITS;
-    std::cin >> TOTAL_BITS;
+    std::cin.ignore(std::numeric_limits<std::streamsize>::max(), '\n');
 
     std::cout << "Output: entropy.bin, comes equiped with a metadata file\n";
-    std::cout << "You can use this file to run statistical tests for The National Institute of Standards and Technology (NIST)\n";
+    std::cout << "You can use this file for statistics: National Institute of Standards and Technology (NIST)\n";
 
     auto start = std::chrono::steady_clock::now();
 
-    std::string insaneEntropy = bep.get(TOTAL_BITS);
+    std::string entropy = bep.get(amount);
 
-    auto end = std::chrono::steady_clock::now();
+    auto end        = std::chrono::steady_clock::now();
     auto durationMs = std::chrono::duration_cast<std::chrono::milliseconds>(end - start).count();
 
     // Write raw entropy (NIST input)
     {
         std::ofstream out("entropy.bin", std::ios::binary);
-        out << insaneEntropy;
+        out << entropy;
     }
 
     // Write metadata
     {
         std::ofstream info("entropy_info.txt");
         double seconds = durationMs / 1000.0;
-        double bps = TOTAL_BITS / seconds;
+        double bps     = amount / seconds;
 
         info << "Oikos Entropy Generator\n";
-        info << "Bits generated: " << TOTAL_BITS << "\n";
+        info << "Bits generated: " << amount << "\n";
         info << "Time (ms): " << durationMs << "\n";
         info << "Time (s): " << seconds << "\n";
         info << "Throughput (bits/sec): " << bps << "\n";
@@ -414,7 +548,7 @@ int main() {
     }
 
     std::cout << "\nDone.\n";
-    std::cout << "Generated " << TOTAL_BITS << " bits\n";
+    std::cout << "Generated " << amount << " bits\n";
     std::cout << "Time: " << durationMs << " ms\n";
 
     std::cout << "\nProgram finished. Press Enter to exit..." << std::endl;
