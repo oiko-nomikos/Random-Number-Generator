@@ -482,11 +482,51 @@ class BinaryEntropyPool {
         SecureMemory::unlock(bitPool.data(), POOL_RESERVED); // must match the size used in lock() above
     }
 
+    // Fetches bitsNeeded bits, automatically choosing the right strategy:
+    // - <= POOL_CAPACITY (one refill's worth): served directly via get(), fastest path, no chunking overhead.
+    // - >  POOL_CAPACITY: routed to getLarge(), which pulls it in POOL_CAPACITY-sized chunks.
+    // This is the method callers should use by default — get() or getLarge() remain available directly
+    // if you specifically know which strategy you want (e.g. a tight loop issuing many small requests).
+    inline std::string request(size_t bitsNeeded) {
+        if (bitsNeeded <= POOL_CAPACITY)
+            return get(bitsNeeded);
+        return getLarge(bitsNeeded);
+    }
+
+    // Current number of unconsumed bits sitting in the pool. Mainly for diagnostics/monitoring.
+    inline size_t available() const {
+        std::lock_guard<std::mutex> lock(poolMutex);
+        return bitPool.size();
+    }
+
+    // Securely wipes the entire pool and re-reserves capacity for future refills.
+    // Called on destruction, and available to call manually if you need to force-discard
+    // the current pool contents (e.g. suspected compromise, or before a sensitive operation).
+    inline void drain() {
+        std::lock_guard<std::mutex> lock(poolMutex);
+        secureClear(bitPool);
+        bitPool.reserve(POOL_CAPACITY);
+    }
+
+  private:
+    RandomNumberGenerator rng;
+
+    static constexpr size_t POOL_CAPACITY = 512 * 256;         // intended: 131,072 bits — one rng.run()
+    static constexpr size_t POOL_RESERVED = POOL_CAPACITY * 2; // 262,144 bits — 200% headroom over one refill
+    static constexpr size_t LOW_WATERMARK = 512 * 128;         // refill proactively once below half of POOL_CAPACITY
+
+    std::string bitPool;          // the pool itself — a flat string of '0'/'1' characters acting as a bit queue
+    mutable std::mutex poolMutex; // guards all reads/writes to bitPool, since get()/available()/drain() can be called from multiple threads
+
     // Returns exactly bitsNeeded bits, refilling from the RNG first if the pool is running low
     // or doesn't have enough to satisfy the request. Consumed bits are securely erased from the
     // pool immediately after being copied out, so they can't linger in memory post-use.
     inline std::string get(size_t bitsNeeded) {
         std::lock_guard<std::mutex> lock(poolMutex); // pool is shared across threads — serialize all access
+
+        if (bitsNeeded > POOL_RESERVED) {
+            throw std::invalid_argument("get(): requested bits exceed pool's maximum single-request capacity — use request() or getLarge() instead");
+        }
 
         if (bitPool.size() < LOW_WATERMARK)
             refill(); // proactive top-up once we drop below the halfway mark, before we're actually starved
@@ -515,31 +555,6 @@ class BinaryEntropyPool {
 
         return result;
     }
-
-    // Current number of unconsumed bits sitting in the pool. Mainly for diagnostics/monitoring.
-    inline size_t available() const {
-        std::lock_guard<std::mutex> lock(poolMutex);
-        return bitPool.size();
-    }
-
-    // Securely wipes the entire pool and re-reserves capacity for future refills.
-    // Called on destruction, and available to call manually if you need to force-discard
-    // the current pool contents (e.g. suspected compromise, or before a sensitive operation).
-    inline void drain() {
-        std::lock_guard<std::mutex> lock(poolMutex);
-        secureClear(bitPool);
-        bitPool.reserve(POOL_CAPACITY);
-    }
-
-  private:
-    RandomNumberGenerator rng;
-
-    static constexpr size_t POOL_CAPACITY = 512 * 256;         // intended: 131,072 bits — one rng.run()
-    static constexpr size_t POOL_RESERVED = POOL_CAPACITY * 2; // 262,144 bits — 200% headroom over one refill
-    static constexpr size_t LOW_WATERMARK = 512 * 128;         // refill proactively once below half of POOL_CAPACITY
-
-    std::string bitPool;          // the pool itself — a flat string of '0'/'1' characters acting as a bit queue
-    mutable std::mutex poolMutex; // guards all reads/writes to bitPool, since get()/available()/drain() can be called from multiple threads
 
     // Unused — getLarge() currently reimplements this chunking loop inline instead of calling this.
     // Either wire this in or remove it so there's only one chunking implementation to maintain.
@@ -611,7 +626,7 @@ int main() {
 
     auto start = std::chrono::steady_clock::now();
 
-    std::string entropy = bep.get(amount);
+    std::string entropy = bep.request(amount);
 
     auto end        = std::chrono::steady_clock::now();
     auto durationMs = std::chrono::duration_cast<std::chrono::milliseconds>(end - start).count();
