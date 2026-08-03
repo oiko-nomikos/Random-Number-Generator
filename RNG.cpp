@@ -87,6 +87,12 @@
 #include <mutex> // std::mutex, std::lock_guard, std::unique_lock — thread synchronisation
 
 //----------------------------------------------------------------------------------
+// Math specific headers
+//----------------------------------------------------------------------------------
+
+#include <cmath> // std::sqrt, std::round, std::sin, std::cos, etc.
+
+//----------------------------------------------------------------------------------
 // Windows API
 //----------------------------------------------------------------------------------
 
@@ -100,6 +106,34 @@
 using Bytes = std::vector<uint8_t>; // Convenience alias for a byte buffer
 
 //----------------------------------------------------------------------------------
+// Marcos: Version
+//----------------------------------------------------------------------------------
+
+#define CSPRNG_VERSION "v0.1.0"
+
+//----------------------------------------------------------------------------------
+// Windows Specific Utilities
+//----------------------------------------------------------------------------------
+
+void maximizeConsoleWindow() {
+#ifdef _WIN32
+    HWND consoleWindow = GetConsoleWindow();
+
+    if (consoleWindow != nullptr) {
+        ShowWindow(consoleWindow, SW_MAXIMIZE);
+    }
+#endif
+}
+
+inline void clearScreen() {
+#ifdef _WIN32
+    system("cls");
+#else
+    system("clear");
+#endif
+}
+
+//----------------------------------------------------------------------------------
 //----------------------------------------------------------------------------------
 //----------------------------------------------------------------------------------
 
@@ -108,6 +142,151 @@ class SystemClock {
     inline long long getNanoseconds() {
         auto now = std::chrono::high_resolution_clock::now();
         return std::chrono::duration_cast<std::chrono::nanoseconds>(now.time_since_epoch()).count();
+    }
+};
+
+//----------------------------------------------------------------------------------
+//----------------------------------------------------------------------------------
+//----------------------------------------------------------------------------------
+
+class Functions {
+  public:
+    // All integral types (int, long, long long, uint64_t, etc.)
+    template <typename T> static std::enable_if_t<std::is_integral_v<T>, std::string> format(T value) { return addCommas(std::to_string(value)); }
+
+    // Default: 2 decimal places
+    static std::string format(double value) { return formatFixed(value, 2); }
+
+    // Custom precision
+    static std::string formatFixed(double value, int precision) {
+        std::ostringstream ss;
+        ss << std::fixed << std::setprecision(precision) << value;
+        return addCommas(ss.str());
+    }
+
+    // Prints in-place using \r — call repeatedly to animate
+    static void printProgressBar(int current, int total, int width = 50) {
+        std::cout << '\r' << makeProgressBar(current, total, width);
+        std::cout.flush();
+    }
+
+  private:
+    // Inserts thousand separators into a numeric string
+    static std::string addCommas(std::string s) {
+        size_t dotPos = s.find('.');
+        if (dotPos == std::string::npos)
+            dotPos = s.size();
+
+        int pos = static_cast<int>(dotPos) - 3;
+        while (pos > 0) {
+            s.insert(pos, ",");
+            pos -= 3;
+        }
+
+        return s;
+    }
+
+    static std::string makeProgressBar(int current, int total, int width = 50) {
+        if (total <= 0) {
+            total = 1;
+        }
+
+        double progress = std::clamp(static_cast<double>(current) / static_cast<double>(total), 0.0, 1.0);
+        int filled      = static_cast<int>(std::round(progress * width));
+
+        std::ostringstream oss;
+        oss << "[";
+        for (int i = 0; i < filled; ++i) {
+            oss << "#";
+        }
+        for (int i = filled; i < width; ++i) {
+            oss << " ";
+        }
+        oss << "] " << std::setw(3) << static_cast<int>(progress * 100) << "%";
+
+        return oss.str();
+    }
+};
+
+//----------------------------------------------------------------------------------
+//----------------------------------------------------------------------------------
+//----------------------------------------------------------------------------------
+
+class EntropyAnalyzer {
+  public:
+    void feedBits(const std::string &bits) {
+        for (size_t i = 0; i + 8 <= bits.size(); i += 8) {
+            uint8_t byte = 0;
+            for (int b = 0; b < 8; b++) {
+                byte <<= 1;
+                byte |= (bits[i + b] == '1') ? 1 : 0;
+            }
+            freq[byte]++;
+            totalBytes++;
+        }
+    }
+
+    void print() const {
+        if (totalBytes == 0) {
+            std::cout << "No data.\n";
+            return;
+        }
+
+        uint64_t maxFreq = *std::max_element(freq.begin(), freq.end());
+
+        std::cout << "\nBYTE FREQUENCY DISTRIBUTION\n";
+        std::cout << "Total bytes:                 " << totalBytes << "\n";
+        std::cout << "Expected per byte (uniform): " << std::fixed << std::setprecision(2) << (100.0 / 256.0) << "%\n";
+        std::cout << std::string(60, '-') << "\n\n";
+
+        for (int i = 0; i < 256; i++) {
+            double pct   = (static_cast<double>(freq[i]) / totalBytes) * 100.0;
+            double ofMax = (static_cast<double>(freq[i]) / maxFreq) * 100.0;
+            int blocks   = static_cast<int>(ofMax / 10.0);
+            if (blocks > 10)
+                blocks = 10;
+
+            std::cout << std::dec << std::setw(3) << i << " (0x" << std::hex << std::uppercase << std::setw(2) << std::setfill('0') << i << std::dec << std::setfill(' ') << ")"
+                      << " (";
+            for (int b = 7; b >= 0; b--)
+                std::cout << ((i >> b) & 1);
+            std::cout << ")"
+                      << " | ";
+
+            for (int b = 0; b < 10; b++)
+                std::cout << (b < blocks ? "█" : "·");
+
+            std::cout << "  " << std::fixed << std::setprecision(3) << pct << "%"
+                      << "  (" << freq[i] << ")\n";
+        }
+
+        double mean     = static_cast<double>(totalBytes) / 256.0;
+        double variance = 0.0;
+        for (int i = 0; i < 256; i++) {
+            double diff = static_cast<double>(freq[i]) - mean;
+            variance += diff * diff;
+        }
+        variance /= 256.0;
+        double stddev = std::sqrt(variance);
+
+        uint64_t minFreq = *std::min_element(freq.begin(), freq.end());
+
+        std::cout << "\n" << std::string(60, '-') << "\n";
+        std::cout << "Min frequency: " << minFreq << "  (" << std::fixed << std::setprecision(3) << (static_cast<double>(minFreq) / totalBytes * 100.0) << "%)\n";
+        std::cout << "Max frequency: " << maxFreq << "  (" << std::fixed << std::setprecision(3) << (static_cast<double>(maxFreq) / totalBytes * 100.0) << "%)\n";
+        std::cout << "Std deviation: " << std::fixed << std::setprecision(2) << stddev << " bytes\n";
+        std::cout << "Ideal uniform: " << std::fixed << std::setprecision(2) << mean << " bytes per value\n";
+    }
+
+  private:
+    static constexpr size_t BYTE_RANGE = 256;
+
+    std::array<uint64_t, BYTE_RANGE> freq{};
+    uint64_t totalBytes = 0;
+
+    void reset() {
+        freq.fill(0);
+        totalBytes = 0;
     }
 };
 
@@ -398,6 +577,7 @@ class RandomNumberGenerator {
     CRYPTO::SHA256 sha;
     SystemClock systemClock;
 
+    static constexpr int update_interval       = 10;   // update the progress bar every 10 iterations
     static constexpr int totalIterations       = 1024; // total number of timing samples drawn per run()
     static constexpr size_t localBufferSize    = 512;  // ring buffer capacity — holds the last 512 raw entropy bits, hashed together to whiten/condition the output
     std::array<int, localBufferSize> localBits = {};   // the ring buffer itself — one int (0/1) per bit; array chosen over vector for fixed size + speed
@@ -510,6 +690,7 @@ class BinaryEntropyPool {
 
   private:
     RandomNumberGenerator rng;
+    Functions functions;
 
     static constexpr size_t POOL_CAPACITY = 512 * 256;         // intended: 131,072 bits — one rng.run()
     static constexpr size_t POOL_RESERVED = POOL_CAPACITY * 2; // 262,144 bits — 200% headroom over one refill
@@ -546,12 +727,19 @@ class BinaryEntropyPool {
         result.reserve(bitsNeeded);
 
         size_t remaining = bitsNeeded;
+        size_t completed = 0;
+        std::cout << '\n';
 
         while (remaining > 0) {
             size_t chunkSize = std::min(remaining, POOL_CAPACITY);
             result += get(chunkSize);
+            completed += chunkSize;
             remaining -= chunkSize;
+
+            functions.printProgressBar(completed, bitsNeeded);
         }
+
+        std::cout << '\n';
 
         return result;
     }
@@ -611,18 +799,29 @@ class BinaryEntropyPool {
 //----------------------------------------------------------------------------------
 
 int main() {
+#ifdef _WIN32
+    SetConsoleOutputCP(CP_UTF8);
+    SetConsoleCP(CP_UTF8);
+    maximizeConsoleWindow();
+    SetConsoleTitle(TEXT("Oiko's RNG: " CSPRNG_VERSION));
+#endif
+
     RandomNumberGenerator rng;
     BinaryEntropyPool bep;
+    EntropyAnalyzer analyzer;
+    Functions functions;
 
-    std::cout << "Welcome to Oikos Entropy Generator!\n\n";
-    std::cout << "Please enter the amount of entropy you wish to Generate!\n";
+    std::cout << "Welcome to Oikos Random Number Generator!\n";
+    std::cout << "Version: " << CSPRNG_VERSION << "\n\n";
+    std::cout << "Please enter the amount of entropy you wish to Generate!\n\n";
 
     int amount;
     std::cin >> amount;
     std::cin.ignore(std::numeric_limits<std::streamsize>::max(), '\n');
 
-    std::cout << "Output: entropy.bin, comes equiped with a metadata file\n";
-    std::cout << "You can use this file for statistics: National Institute of Standards and Technology (NIST)\n";
+    std::cout << "\n";
+    std::cout << "Output: entropy.bin      - Contains the raw binary data\n";
+    std::cout << "Output: entropy_info.txt - Contains statistics: National Institute of Standards and Technology (NIST)\n";
 
     auto start = std::chrono::steady_clock::now();
 
@@ -630,6 +829,8 @@ int main() {
 
     auto end        = std::chrono::steady_clock::now();
     auto durationMs = std::chrono::duration_cast<std::chrono::milliseconds>(end - start).count();
+    double seconds  = durationMs / 1000.0;
+    double bps      = amount / seconds;
 
     // Write raw entropy (NIST input)
     {
@@ -640,20 +841,25 @@ int main() {
     // Write metadata
     {
         std::ofstream info("entropy_info.txt");
-        double seconds = durationMs / 1000.0;
-        double bps     = amount / seconds;
 
         info << "Oikos Entropy Generator\n";
-        info << "Bits generated: " << amount << "\n";
-        info << "Time (ms): " << durationMs << "\n";
-        info << "Time (s): " << seconds << "\n";
-        info << "Throughput (bits/sec): " << bps << "\n";
-        info << "Throughput (Mbps): " << (bps / 1'000'000.0) << "\n";
+        info << "Version:               " << CSPRNG_VERSION << "\n";
+        info << "Bits generated:        " << functions.format(amount) << "\n";
+        info << "Time (ms):             " << functions.format(durationMs) << "\n";
+        info << "Time (s):              " << functions.formatFixed(seconds, 3) << "\n";
+        info << "Throughput (bits/sec): " << functions.format(bps) << "\n";
+        info << "Throughput (Mbps):     " << functions.formatFixed(bps / 1'000'000.0, 2) << "\n";
     }
 
     std::cout << "\nDone.\n";
-    std::cout << "Generated " << amount << " bits\n";
-    std::cout << "Time: " << durationMs << " ms\n";
+    std::cout << "Time (ms):             " << functions.format(durationMs) << "\n";
+    std::cout << "Time (s):              " << functions.formatFixed(seconds, 3) << "\n";
+    std::cout << "Bits generated:        " << functions.format(amount) << "\n";
+    std::cout << "Throughput (bits/sec): " << functions.format(bps) << "\n";
+    std::cout << "Throughput (Mbps):     " << functions.formatFixed(bps / 1'000'000.0, 2) << "\n\n";
+
+    analyzer.feedBits(entropy); // add the entropy output to check the distribution across bytes
+    analyzer.print();           // print the distribution table
 
     std::cout << "\nProgram finished. Press Enter to exit..." << std::endl;
     std::cin.get();
