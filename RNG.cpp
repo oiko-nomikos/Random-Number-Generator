@@ -307,34 +307,60 @@ class SHA256 {
 class RandomNumberGenerator {
   public:
     inline std::string run() {
-        const size_t producingIterations = totalIterations - localBufferSize;
-        const size_t expectedBits        = producingIterations * total;
-
+        // first, reserve enough space for the expected output size to avoid repeated reallocations during string concatenation.
         std::string result;
-        result.reserve(expectedBits);
-
-        // reset state
-        head      = 0;
-        tail      = 0;
-        count     = 0;
-        filled    = false;
-        globalSum = 0;
-        globalAvg = 0;
+        result.reserve(expectedBits); // capacity hint only — see note on expectedBits below, actual output can be slightly longer
+        // one must always reset the state before each run() to ensure that the ring buffer and running averages are fresh for this invocation.
+        resetState();
 
         for (int i = 0; i < totalIterations; ++i) {
+            // apply the most imprtant function - see bellow in private section for more details
             long long duration = countdown();
+            // increment the count of samples, add the duration to the running sum, and compute the new running average.
             ++count;
             globalSum += duration;
-            globalAvg = globalSum / count;
+            globalAvg = globalSum / count; // running average, used as the threshold for this iteration's bit extraction
 
+            // extract 1 bit of raw entropy: was this timing sample above or below the running average?
+            // this is the "jitter" bit — noisy, biased, low-quality on its own, which is why it gets pooled and hashed below
             int bit = duration < globalAvg ? 0 : 1;
 
+            // ring buffer write (push newest bit)
             localBits[tail] = bit;
             tail            = (tail + 1) % localBufferSize;
 
-            if (!filled && tail == localBufferSize - 1)
-                filled = true;
+            // assuming 4 values - 0 equals the point at which the series wraps around, marking the end of the local buffer size.
+            // pushed  1 | ... | head=0 tail=1
+            // pushed  2 | ... | head=0 tail=2
+            // pushed  3 | ... | head=0 tail=3
+            // pushed  4 | ... | head=0 tail=0   <- wrapped! tail went 3 -> (3+1) % 4 = 0
+            // pushed  5 | ... | head=1 tail=1
+            //
+            // how it works, the array is faster to compute, hashLocalBits() later orders the bits for SHA256 to hash
+            // [1, None, None, None]
+            // [1, 2, None, None]
+            // [1, 2, 3, None]
+            // [1, 2, 3, 4]
+            // [5, 2, 3, 4]   <- only slot 0 changed: 1 -> 5
+            // [5, 6, 3, 4]   <- only slot 1 changed: 2 -> 6
+            // [5, 6, 7, 4]   <- only slot 2 changed: 3 -> 7
+            // [5, 6, 7, 8]   <- only slot 3 changed: 4 -> 8
+            //
+            // then we are back to zero, completeing the loop in the fastest time possible
+            // the oldest bit is now at head=0, the newest bit is at tail=0, and the buffer is full.
+            if (!filled) {
+                // buffer isn't full yet — we're still in the initial fill-up phase.
+                if (tail == 0)
+                    filled = true;
+            } else {
+                head = (head + 1) % localBufferSize;
+            }
 
+            // once full, every iteration represents one full 512-bit sliding window (oldest -> newest),
+            // 512 bits = 2^512 = 64 bytes, which is exactly what SHA-256 expects as input.
+            // this is an astronimcally large number of combinations, so the output is effectively "whitened" and conditioned.
+            // in scientific notation, 2⁵¹² ≈ 1.34 × 10¹⁵⁴ which is a 155 digit long number so large that it is effectively impossible to brute-force or predict.
+            // we now hash it every time to keep the output stream continuously fed with fresh digests.
             if (filled) {
                 result += hashLocalBits();
             }
@@ -348,19 +374,31 @@ class RandomNumberGenerator {
     CRYPTO::SHA256 sha;
     SystemClock systemClock;
 
-    static constexpr int totalIterations    = 1024;
-    static constexpr size_t localBufferSize = 512;
-    static constexpr size_t total           = 256;
-    static constexpr int byte64             = 64;
+    static constexpr int totalIterations       = 1024; // total number of timing samples drawn per run()
+    static constexpr size_t localBufferSize    = 512;  // ring buffer capacity — holds the last 512 raw entropy bits, hashed together to whiten/condition the output
+    std::array<int, localBufferSize> localBits = {};   // the ring buffer itself — one int (0/1) per bit; array chosen over vector for fixed size + speed
+    static constexpr size_t total              = 256;  // SHA-256 digest size in bits — size of each unit of output this class produces
+    static constexpr int byte64                = 64;   // 512 bits (localBufferSize) expressed in bytes — what actually gets fed into SHA256::update()
 
-    std::array<int, localBufferSize> localBits = {};
-    size_t head                                = 0;
-    size_t tail                                = 0;
-    bool filled                                = false;
-    long long globalSum                        = 0;
-    long long globalAvg                        = 0;
-    int count                                  = 0;
+    // NOTE: this is a lower-bound estimate for reserve(), not an exact count.
+    // filled flips true partway through iteration (localBufferSize - 1), so hashing actually starts
+    // one iteration earlier than this subtraction assumes — actual output is expectedBits + one extra digest.
+    // localBufferSize - 1 = 511 is the last valid index, precisely because of 0-indexing.
+    static constexpr size_t producingIterations = totalIterations - localBufferSize;
+    static constexpr size_t expectedBits        = producingIterations * total;
 
+    size_t head         = 0;     // index of the OLDEST live bit in the ring buffer (next to be evicted on write, once full)
+    size_t tail         = 0;     // index of the NEXT WRITE position (where the newest bit goes)
+    bool filled         = false; // latches true once the ring buffer has been fully populated at least once
+    long long globalSum = 0;     // running sum of all timing samples seen so far this run
+    long long globalAvg = 0;     // running average of timing samples — used as the live threshold for bit extraction
+    long long count     = 0;     // number of timing samples taken so far this run (denominator for globalAvg)
+
+    // busy-wait a fixed, tiny amount of work and measure how long it actually took in nanoseconds.
+    // for faster computers, this will be a smaller number; for slower computers, it will be larger.
+    // therefore: the volitile value x = 10 can be changed for x = 100 etc,.
+    // the actual duration is noisy due to CPU/OS scheduling jitter, cache state, thermal throttling, etc —
+    // that jitter is the raw entropy source this whole class is built on.
     inline long long countdown() {
         volatile int x = 10;
         auto start     = systemClock.getNanoseconds();
@@ -371,10 +409,14 @@ class RandomNumberGenerator {
         return systemClock.getNanoseconds() - start;
     }
 
+    // packs the current 512-bit ring buffer window into 64 bytes (oldest bit first, MSB-first within each byte),
+    // then runs it through SHA-256 to condition/whiten the raw jitter bits into a uniform-looking digest.
     inline std::string hashLocalBits() {
         uint8_t bytes[64] = {0};
 
         for (size_t i = 0; i < localBufferSize; ++i) {
+            // walk the ring starting at head (oldest) and wrapping forward to tail (newest) —
+            // this only reads the correct chronological order because head is now actually maintained above.
             size_t idx = (head + i) % localBufferSize;
             if (localBits[idx]) {
                 bytes[i / 8] |= (1 << (7 - (i % 8)));
@@ -384,6 +426,18 @@ class RandomNumberGenerator {
         sha.update(bytes, byte64);
 
         return sha.digestBinary();
+    }
+
+    // resets all run-scoped state so run() can be called repeatedly and produce independent output each time.
+    // note: localBits itself is intentionally NOT cleared here — it gets fully overwritten during the
+    // fill-up phase of the next run() before filled ever becomes true again, so stale bits never get hashed.
+    void resetState() {
+        head      = 0;
+        tail      = 0;
+        count     = 0;
+        filled    = false;
+        globalSum = 0;
+        globalAvg = 0;
     }
 };
 
