@@ -115,6 +115,32 @@ class SystemClock {
 //----------------------------------------------------------------------------------
 //----------------------------------------------------------------------------------
 
+// wrapper around platform-specific "pin memory, prevent swap" calls.
+// used anywhere sensitive data (entropy pools, key material) needs to stay
+// out of swap/pagefile for the lifetime of the object holding it.
+class SecureMemory {
+  public:
+    static inline bool lock(void *ptr, size_t bytes) {
+#ifdef _WIN32
+        return VirtualLock(ptr, bytes) != 0;
+#else
+        return mlock(ptr, bytes) == 0;
+#endif
+    }
+
+    static inline bool unlock(void *ptr, size_t bytes) {
+#ifdef _WIN32
+        return VirtualUnlock(ptr, bytes) != 0;
+#else
+        return munlock(ptr, bytes) == 0;
+#endif
+    }
+};
+
+//----------------------------------------------------------------------------------
+//----------------------------------------------------------------------------------
+//----------------------------------------------------------------------------------
+
 namespace CRYPTO {
 class SHA256 {
   public:
@@ -234,7 +260,6 @@ class SHA256 {
     }
 
   private:
-    static constexpr const char *CLASS_NAME = "SHA256";
     uint32_t h[8];
     uint64_t bitlen;
     uint8_t buffer[64];
@@ -370,7 +395,6 @@ class RandomNumberGenerator {
     }
 
   private:
-    static constexpr const char *CLASS_NAME = "RandomNumberGenerator";
     CRYPTO::SHA256 sha;
     SystemClock systemClock;
 
@@ -448,30 +472,35 @@ class RandomNumberGenerator {
 class BinaryEntropyPool {
   public:
     BinaryEntropyPool() {
-        bitPool.reserve(POOL_RESERVED); // reserve 200% upfront
-        lockMemory();
-        // refill();
+        bitPool.reserve(POOL_RESERVED);                    // pre-allocate 200% of one refill's worth upfront
+        SecureMemory::lock(bitPool.data(), POOL_RESERVED); // pin the reserved region so it can't be swapped to disk
+        // refill(); // intentionally left disabled — pool starts empty, first get() call triggers the initial fill
     }
 
     ~BinaryEntropyPool() {
-        drain();
-        unlockMemory();
+        drain();                                             // zero out any remaining bits before releasing memory
+        SecureMemory::unlock(bitPool.data(), POOL_RESERVED); // must match the size used in lock() above
     }
 
+    // Returns exactly bitsNeeded bits, refilling from the RNG first if the pool is running low
+    // or doesn't have enough to satisfy the request. Consumed bits are securely erased from the
+    // pool immediately after being copied out, so they can't linger in memory post-use.
     inline std::string get(size_t bitsNeeded) {
-        std::lock_guard<std::mutex> lock(poolMutex);
+        std::lock_guard<std::mutex> lock(poolMutex); // pool is shared across threads — serialize all access
 
         if (bitPool.size() < LOW_WATERMARK)
-            refill();
+            refill(); // proactive top-up once we drop below the halfway mark, before we're actually starved
         while (bitPool.size() < bitsNeeded)
-            refill();
+            refill(); // reactive top-up — guarantees enough bits exist to satisfy this specific request
 
-        std::string result = bitPool.substr(0, bitsNeeded);
-        secureErase(bitsNeeded);
+        std::string result = bitPool.substr(0, bitsNeeded); // copy out the requested prefix
+        secureErase(bitsNeeded);                            // wipe + remove those bits from the pool so they're one-time-use
 
         return result;
     }
 
+    // Same contract as get(), but for requests larger than a single refill's worth (POOL_CAPACITY).
+    // Pulls bits in POOL_CAPACITY-sized chunks via repeated get() calls and concatenates them.
     inline std::string getLarge(size_t bitsNeeded) {
         std::string result;
         result.reserve(bitsNeeded);
@@ -487,11 +516,15 @@ class BinaryEntropyPool {
         return result;
     }
 
+    // Current number of unconsumed bits sitting in the pool. Mainly for diagnostics/monitoring.
     inline size_t available() const {
         std::lock_guard<std::mutex> lock(poolMutex);
         return bitPool.size();
     }
 
+    // Securely wipes the entire pool and re-reserves capacity for future refills.
+    // Called on destruction, and available to call manually if you need to force-discard
+    // the current pool contents (e.g. suspected compromise, or before a sensitive operation).
     inline void drain() {
         std::lock_guard<std::mutex> lock(poolMutex);
         secureClear(bitPool);
@@ -501,14 +534,15 @@ class BinaryEntropyPool {
   private:
     RandomNumberGenerator rng;
 
-    static constexpr const char *CLASS_NAME = "BinaryEntropyPool";
-    static constexpr size_t POOL_CAPACITY   = 512 * 256;         // 131,072 bits — one rng.run()
-    static constexpr size_t POOL_RESERVED   = POOL_CAPACITY * 2; // 262,144 bits — 200%
-    static constexpr size_t LOW_WATERMARK   = 512 * 128;         // refill below halfway
+    static constexpr size_t POOL_CAPACITY = 512 * 256;         // intended: 131,072 bits — one rng.run()
+    static constexpr size_t POOL_RESERVED = POOL_CAPACITY * 2; // 262,144 bits — 200% headroom over one refill
+    static constexpr size_t LOW_WATERMARK = 512 * 128;         // refill proactively once below half of POOL_CAPACITY
 
-    std::string bitPool;
-    mutable std::mutex poolMutex;
+    std::string bitPool;          // the pool itself — a flat string of '0'/'1' characters acting as a bit queue
+    mutable std::mutex poolMutex; // guards all reads/writes to bitPool, since get()/available()/drain() can be called from multiple threads
 
+    // Unused — getLarge() currently reimplements this chunking loop inline instead of calling this.
+    // Either wire this in or remove it so there's only one chunking implementation to maintain.
     inline std::vector<std::string> getChunked(size_t bitsNeeded) {
         std::vector<std::string> chunks;
 
@@ -523,8 +557,23 @@ class BinaryEntropyPool {
         return chunks;
     }
 
-    inline void refill() { bitPool += rng.run(); }
+    inline void refill() {
+        if (bitPool.size() >= POOL_RESERVED)
+            return; // already at max reserved capacity — adding more would force a reallocation, invalidating the memory lock
 
+        std::string fresh = rng.run();
+        size_t room       = POOL_RESERVED - bitPool.size();
+
+        if (fresh.size() > room)
+            fresh.resize(room); // trim to whatever room remains — wastes some freshly-generated entropy bits, but that's a far cheaper cost than an unlocked buffer
+
+        bitPool += fresh;
+    }
+
+    // Overwrites every byte of the given string with 0 before clearing it, so freed/reused
+    // memory doesn't retain the old bit pattern. volatile prevents the compiler from optimizing
+    // this "pointless-looking" write-then-discard away — a plain loop without volatile could
+    // legally be eliminated entirely by the optimizer since the values are never read afterward.
     inline void secureClear(std::string &s) {
         volatile char *p = s.data();
         for (size_t i = 0; i < s.size(); ++i)
@@ -532,27 +581,13 @@ class BinaryEntropyPool {
         s.clear();
     }
 
+    // Same secure-wipe technique as secureClear(), but only for the first n bits/chars —
+    // used by get() to destroy just the bits that were handed out, leaving the rest of the pool intact.
     inline void secureErase(size_t n) {
         volatile char *p = bitPool.data();
         for (size_t i = 0; i < n; ++i)
             p[i] = 0;
         bitPool.erase(0, n);
-    }
-
-    inline void lockMemory() {
-#ifdef _WIN32
-        VirtualLock(bitPool.data(), POOL_RESERVED);
-#else
-        mlock(bitPool.data(), POOL_RESERVED);
-#endif
-    }
-
-    inline void unlockMemory() {
-#ifdef _WIN32
-        VirtualUnlock(bitPool.data(), POOL_CAPACITY);
-#else
-        munlock(bitPool.data(), POOL_CAPACITY);
-#endif
     }
 };
 
