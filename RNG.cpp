@@ -49,7 +49,7 @@
 // ---------------------------------------------------------------------------------
 // THIS IS NOT PRODUCTION-GRADE CRYPTOGRAPHY.
 //
-// Discretion  must be given - use at own risk!
+// Discretion must be given - use at own risk!
 //
 // If you find a bug or weakness — please report it responsibly.
 //
@@ -58,39 +58,49 @@
 //----------------------------------------------------------------------------------
 
 //----------------------------------------------------------------------------------
-// Core C++ Input/Output and Strings
+// Core C++ Input / Output and Strings
 //----------------------------------------------------------------------------------
 
 #include <fstream>  // std::ifstream, std::ofstream — file input/output
 #include <iostream> // std::cout, std::cin, std::cerr — console input/output
-#include <string>   // std::string — dynamic string class
 #include <iomanip>  // std::setw, std::setfill, std::setprecision — formatted output
-#include <limits>   // std::numeric_limits — type limits and stream buffer utilities
+#include <string>   // std::string — dynamic string class
+#include <limits>   // std::numeric_limits — type limits and stream utilities
 
 //----------------------------------------------------------------------------------
 // Containers and Data Structures
 //----------------------------------------------------------------------------------
 
 #include <vector> // std::vector — dynamic contiguous array
-#include <deque>  // std::deque — double-ended queue with fast front/back insertion
+#include <deque>  // std::deque — double-ended queue
+#include <array>  // std::array — fixed-size array
+#include <bitset> // std::bitset — fixed-size bit manipulation
+
+//----------------------------------------------------------------------------------
+// Algorithms
+//----------------------------------------------------------------------------------
+
+#include <algorithm> // std::sort, std::max, std::min, std::clamp, std::swap, etc.
+
+//----------------------------------------------------------------------------------
+// Mathematics
+//----------------------------------------------------------------------------------
+
+#include <cmath>   // std::sqrt, std::pow, std::log, std::exp, std::erfc, etc.
+#include <complex> // std::complex — complex numbers (used by FFT/DFT)
+#include <random>  // Random number engines and statistical distributions
 
 //----------------------------------------------------------------------------------
 // Timing
 //----------------------------------------------------------------------------------
 
-#include <chrono> // std::chrono — clocks, durations, and time measurements
+#include <chrono> // std::chrono — clocks, durations, and timing utilities
 
 //----------------------------------------------------------------------------------
 // Thread Synchronisation
 //----------------------------------------------------------------------------------
 
-#include <mutex> // std::mutex, std::lock_guard, std::unique_lock — thread synchronisation
-
-//----------------------------------------------------------------------------------
-// Math specific headers
-//----------------------------------------------------------------------------------
-
-#include <cmath> // std::sqrt, std::round, std::sin, std::cos, etc.
+#include <mutex> // std::mutex, std::lock_guard, std::unique_lock
 
 //----------------------------------------------------------------------------------
 // Windows API
@@ -106,7 +116,7 @@
 using Bytes = std::vector<uint8_t>; // Convenience alias for a byte buffer
 
 //----------------------------------------------------------------------------------
-// Marcos: Version
+// Macros: Version
 //----------------------------------------------------------------------------------
 
 #define CSPRNG_VERSION "v0.1.0"
@@ -122,14 +132,6 @@ void maximizeConsoleWindow() {
     if (consoleWindow != nullptr) {
         ShowWindow(consoleWindow, SW_MAXIMIZE);
     }
-#endif
-}
-
-inline void clearScreen() {
-#ifdef _WIN32
-    system("cls");
-#else
-    system("clear");
 #endif
 }
 
@@ -313,6 +315,1261 @@ class SecureMemory {
 #else
         return munlock(ptr, bytes) == 0;
 #endif
+    }
+};
+
+//----------------------------------------------------------------------------------
+//----------------------------------------------------------------------------------
+//----------------------------------------------------------------------------------
+
+class TestNIST {
+  public:
+    explicit TestNIST(const std::string &bits)
+        : bits(bits) {}
+
+    struct TestResult {
+        std::string name;
+        bool passed      = false;
+        double statistic = 0.0;
+        double pValue    = 0.0;
+        std::string description;
+    };
+
+    void runAll() {
+        results.clear();
+
+        results.push_back(runFrequency());
+        results.push_back(runBlockFrequency());
+        results.push_back(runRuns());
+        results.push_back(runLongestRun());
+        results.push_back(runMatrixRank());
+        results.push_back(runDFT()); // Discrete Fourier Transform
+        results.push_back(runNonOverlappingTemplate());
+        results.push_back(runOverlappingTemplate());
+        results.push_back(runMaurer());
+        results.push_back(runLinearComplexity());
+        results.push_back(runSerial());
+        results.push_back(runApproximateEntropy());
+        results.push_back(runCumulativeSums());
+        results.push_back(runRandomExcursions());
+        results.push_back(runRandomExcursionsVariant());
+    }
+
+    const std::vector<TestResult> &getResults() const { return results; }
+
+  private:
+    std::string bits;
+    std::vector<TestResult> results;
+    static constexpr double PI = 3.14159265358979323846;
+
+    using Matrix32 = std::array<std::bitset<32>, 32>;
+
+    //======================================================================
+    // Shared math helpers (regularized incomplete gamma function, used by
+    // every chi-square-based test below to turn a statistic into a p-value)
+    //======================================================================
+
+    static double gser(double a, double x) {
+        constexpr int ITMAX  = 200;
+        constexpr double EPS = 3e-9;
+
+        if (x <= 0.0)
+            return 0.0;
+
+        double gln = std::lgamma(a);
+        double ap  = a;
+        double sum = 1.0 / a;
+        double del = sum;
+
+        for (int n = 1; n <= ITMAX; ++n) {
+            ap += 1.0;
+            del *= x / ap;
+            sum += del;
+
+            if (std::fabs(del) < std::fabs(sum) * EPS)
+                break;
+        }
+
+        return sum * std::exp(-x + a * std::log(x) - gln);
+    }
+
+    static double gcf(double a, double x) {
+        constexpr int ITMAX    = 200;
+        constexpr double EPS   = 3e-9;
+        constexpr double FPMIN = 1e-300;
+
+        double gln = std::lgamma(a);
+
+        double b = x + 1.0 - a;
+        double c = 1.0 / FPMIN;
+        double d = 1.0 / b;
+        double h = d;
+
+        for (int i = 1; i <= ITMAX; ++i) {
+            double an = -i * (i - a);
+            b += 2.0;
+            d = an * d + b;
+
+            if (std::fabs(d) < FPMIN)
+                d = FPMIN;
+
+            c = b + an / c;
+
+            if (std::fabs(c) < FPMIN)
+                c = FPMIN;
+
+            d          = 1.0 / d;
+            double del = d * c;
+            h *= del;
+
+            if (std::fabs(del - 1.0) < EPS)
+                break;
+        }
+
+        return std::exp(-x + a * std::log(x) - gln) * h;
+    }
+
+    // Regularized upper incomplete gamma function Q(a, x).
+    // This is what every NIST chi-square test converts its statistic
+    // through to get a p-value: pValue = igamc(df / 2, chiSquared / 2).
+    static double igamc(double a, double x) {
+        if (x < 0.0 || a <= 0.0)
+            return 0.0;
+
+        if (x == 0.0)
+            return 1.0;
+
+        if (x < a + 1.0)
+            return 1.0 - gser(a, x);
+
+        return gcf(a, x);
+    }
+
+    // Iterative in-place Cooley-Tukey FFT. Zero-pads to the next power of
+    // two if needed (runDFT avoids relying on that by pre-truncating to a
+    // power-of-two prefix, so the padding path here only matters if this
+    // helper is reused elsewhere).
+    static void fft(std::vector<std::complex<double>> &a) {
+        size_t n = a.size();
+
+        if (n <= 1)
+            return;
+
+        size_t m = 1;
+
+        while (m < n)
+            m <<= 1;
+
+        a.resize(m, std::complex<double>(0.0, 0.0));
+        n = m;
+
+        for (size_t i = 1, j = 0; i < n; ++i) {
+            size_t bit = n >> 1;
+
+            for (; j & bit; bit >>= 1)
+                j ^= bit;
+
+            j ^= bit;
+
+            if (i < j)
+                std::swap(a[i], a[j]);
+        }
+
+        for (size_t len = 2; len <= n; len <<= 1) {
+            double angle = -2.0 * PI / static_cast<double>(len);
+            std::complex<double> wlen(std::cos(angle), std::sin(angle));
+
+            for (size_t i = 0; i < n; i += len) {
+                std::complex<double> w(1.0, 0.0);
+
+                for (size_t k = 0; k < len / 2; ++k) {
+                    std::complex<double> u = a[i + k];
+                    std::complex<double> v = a[i + k + len / 2] * w;
+
+                    a[i + k]           = u + v;
+                    a[i + k + len / 2] = u - v;
+
+                    w *= wlen;
+                }
+            }
+        }
+    }
+
+    //======================================================================
+    // 1. Frequency (Monobit) Test
+    //======================================================================
+
+    TestResult runFrequency() {
+        TestResult result;
+        result.name = "Frequency (Monobit) Test";
+
+        const size_t n = bits.size();
+
+        if (n == 0) {
+            result.description = "Input contains no data.";
+            return result;
+        }
+
+        long long sum = 0;
+
+        for (char bit : bits) {
+            if (bit == '1') {
+                sum++;
+            } else if (bit == '0') {
+                sum--;
+            }
+        }
+
+        result.statistic = std::abs(sum) / std::sqrt(static_cast<double>(n));
+        result.pValue    = std::erfc(result.statistic / std::sqrt(2.0));
+        result.passed    = (result.pValue >= 0.01);
+
+        if (result.passed)
+            result.description = "Sequence passes the frequency test.";
+        else
+            result.description = "Sequence exhibits a significant bias toward zeros or ones.";
+
+        return result;
+    }
+
+    //======================================================================
+    // 2. Block Frequency Test
+    //======================================================================
+
+    TestResult runBlockFrequency() {
+        TestResult result;
+        result.name = "Block Frequency Test";
+
+        const size_t M = 128; // bits per block
+        const size_t n = bits.size();
+        const size_t N = n / M; // number of complete blocks
+
+        if (N == 0) {
+            result.description = "Not enough data.";
+            return result;
+        }
+
+        double chiSquared = 0.0;
+
+        for (size_t block = 0; block < N; ++block) {
+            size_t ones = 0;
+
+            for (size_t i = 0; i < M; ++i) {
+                if (bits[block * M + i] == '1')
+                    ++ones;
+            }
+
+            double pi = static_cast<double>(ones) / M;
+            chiSquared += 4.0 * M * (pi - 0.5) * (pi - 0.5);
+        }
+
+        result.statistic = chiSquared;
+        result.pValue    = igamc(N / 2.0, chiSquared / 2.0);
+        result.passed    = (result.pValue >= 0.01);
+
+        if (result.passed)
+            result.description = "All blocks have an acceptable balance of zeros and ones.";
+        else
+            result.description = "One or more blocks exhibit significant bias.";
+
+        return result;
+    }
+
+    //======================================================================
+    // 3. Runs Test
+    //======================================================================
+
+    TestResult runRuns() {
+        TestResult result;
+        result.name = "Runs Test";
+
+        const size_t n = bits.size();
+
+        if (n < 2) {
+            result.description = "Not enough data.";
+            return result;
+        }
+
+        size_t ones = 0;
+
+        for (char bit : bits) {
+            if (bit == '1')
+                ++ones;
+        }
+
+        double pi = static_cast<double>(ones) / n;
+
+        if (std::fabs(pi - 0.5) >= (2.0 / std::sqrt(static_cast<double>(n)))) {
+            result.description = "Frequency test prerequisite not satisfied.";
+            return result;
+        }
+
+        size_t runs = 1;
+
+        for (size_t i = 1; i < n; ++i) {
+            if (bits[i] != bits[i - 1])
+                ++runs;
+        }
+
+        result.statistic   = static_cast<double>(runs);
+        double numerator   = std::fabs(runs - (2.0 * n * pi * (1.0 - pi)));
+        double denominator = 2.0 * std::sqrt(2.0 * n) * pi * (1.0 - pi);
+        result.pValue      = std::erfc(numerator / denominator);
+        result.passed      = (result.pValue >= 0.01);
+
+        if (result.passed)
+            result.description = "Run lengths are consistent with randomness.";
+        else
+            result.description = "Run lengths are inconsistent with randomness.";
+
+        return result;
+    }
+
+    //======================================================================
+    // 4. Longest Run of Ones in a Block Test
+    //======================================================================
+
+    size_t longestRunInRange(size_t start, size_t length) const {
+        size_t longest = 0;
+        size_t current = 0;
+
+        for (size_t i = start; i < start + length; ++i) {
+            if (bits[i] == '1') {
+                ++current;
+
+                if (current > longest)
+                    longest = current;
+            } else {
+                current = 0;
+            }
+        }
+
+        return longest;
+    }
+
+    TestResult runLongestRun() {
+        TestResult result;
+        result.name = "Longest Run of Ones in a Block Test";
+
+        const size_t n = bits.size();
+
+        if (n < 128) {
+            result.description = "Not enough data.";
+            return result;
+        }
+
+        size_t M, K, N;
+        std::vector<double> pi;
+
+        if (n < 6272) {
+            M  = 8;
+            K  = 3;
+            N  = 16;
+            pi = {0.2148, 0.3672, 0.2305, 0.1875};
+        } else if (n < 750000) {
+            M  = 128;
+            K  = 5;
+            N  = 49;
+            pi = {0.1174, 0.2430, 0.2493, 0.1752, 0.1027, 0.1124};
+        } else {
+            M  = 10000;
+            K  = 6;
+            N  = 75;
+            pi = {0.0882, 0.2092, 0.2483, 0.1933, 0.1208, 0.0675, 0.0727};
+        }
+
+        auto classify = [&](size_t runLen) -> size_t {
+            if (M == 8) {
+                if (runLen <= 1)
+                    return 0;
+                if (runLen == 2)
+                    return 1;
+                if (runLen == 3)
+                    return 2;
+                return 3;
+            } else if (M == 128) {
+                if (runLen <= 4)
+                    return 0;
+                if (runLen == 5)
+                    return 1;
+                if (runLen == 6)
+                    return 2;
+                if (runLen == 7)
+                    return 3;
+                if (runLen == 8)
+                    return 4;
+                return 5;
+            } else {
+                if (runLen <= 10)
+                    return 0;
+                if (runLen == 11)
+                    return 1;
+                if (runLen == 12)
+                    return 2;
+                if (runLen == 13)
+                    return 3;
+                if (runLen == 14)
+                    return 4;
+                if (runLen == 15)
+                    return 5;
+                return 6;
+            }
+        };
+
+        std::vector<int> v(pi.size(), 0);
+
+        for (size_t block = 0; block < N; ++block) {
+            size_t longest = longestRunInRange(block * M, M);
+            v[classify(longest)]++;
+        }
+
+        double chi = 0.0;
+
+        for (size_t i = 0; i < pi.size(); ++i) {
+            double expected = N * pi[i];
+            double diff     = v[i] - expected;
+            chi += diff * diff / expected;
+        }
+
+        result.statistic = chi;
+        result.pValue    = igamc(K / 2.0, chi / 2.0);
+        result.passed    = (result.pValue >= 0.01);
+
+        if (result.passed)
+            result.description = "Longest run lengths per block are consistent with randomness.";
+        else
+            result.description = "Longest run lengths per block deviate from randomness.";
+
+        return result;
+    }
+
+    //======================================================================
+    // 5. Binary Matrix Rank Test
+    //======================================================================
+
+    TestResult matrixRank(Matrix32 matrix) const {
+        TestResult result;
+        result.name = "Matrix Rank (internal)";
+        int rank    = 0;
+
+        for (int col = 0; col < 32; col++) {
+            int pivot = -1;
+
+            for (int row = rank; row < 32; row++) {
+                if (matrix[row][col]) {
+                    pivot = row;
+                    break;
+                }
+            }
+
+            if (pivot == -1)
+                continue;
+
+            if (pivot != rank)
+                std::swap(matrix[pivot], matrix[rank]);
+
+            for (int row = 0; row < 32; row++) {
+                if (row == rank)
+                    continue;
+
+                if (matrix[row][col]) {
+                    for (int c = col; c < 32; c++)
+                        matrix[row][c] = matrix[row][c] ^ matrix[rank][c];
+                }
+            }
+
+            rank++;
+        }
+
+        result.statistic = static_cast<double>(rank);
+        return result;
+    }
+
+    TestResult runMatrixRank() {
+        TestResult result;
+        result.name = "Binary Matrix Rank Test";
+
+        constexpr size_t rows = 32, cols = 32;
+        constexpr size_t bitsPerMatrix = rows * cols; // 1024
+        const size_t n                 = bits.size();
+        const size_t N                 = n / bitsPerMatrix;
+
+        if (N == 0) {
+            result.description = "Not enough data.";
+            return result;
+        }
+
+        double fullRank = 0, rankMinus1 = 0, rankLess = 0;
+
+        for (size_t idx = 0; idx < N; ++idx) {
+            Matrix32 matrix{};
+            size_t offset = idx * bitsPerMatrix;
+
+            for (size_t r = 0; r < rows; ++r) {
+                for (size_t c = 0; c < cols; ++c) {
+                    matrix[r][c] = (bits[offset + r * cols + c] == '1');
+                }
+            }
+
+            int rank = static_cast<int>(matrixRank(matrix).statistic);
+
+            if (rank == 32)
+                ++fullRank;
+            else if (rank == 31)
+                ++rankMinus1;
+            else
+                ++rankLess;
+        }
+
+        double expectedFull = 0.2888 * N;
+        double expectedM1   = 0.5776 * N;
+        double expectedLess = 0.1336 * N;
+
+        double chi = (fullRank - expectedFull) * (fullRank - expectedFull) / expectedFull + (rankMinus1 - expectedM1) * (rankMinus1 - expectedM1) / expectedM1
+                     + (rankLess - expectedLess) * (rankLess - expectedLess) / expectedLess;
+
+        result.statistic = chi;
+        result.pValue    = igamc(1.0, chi / 2.0);
+        result.passed    = (result.pValue >= 0.01);
+
+        if (result.passed)
+            result.description = "Matrix ranks are consistent with randomness.";
+        else
+            result.description = "Matrix rank distribution deviates from randomness.";
+
+        return result;
+    }
+
+    //======================================================================
+    // 6. Discrete Fourier Transform (Spectral) Test
+    //======================================================================
+
+    TestResult runDFT() {
+        TestResult result;
+        result.name = "Discrete Fourier Transform Test";
+
+        // Use the largest power-of-two prefix so the FFT works on real
+        // data with no zero-padding artifacts skewing the spectrum.
+        size_t n = 1;
+
+        while (n * 2 <= bits.size())
+            n *= 2;
+
+        if (n < 1024) {
+            result.description = "Insufficient data.";
+            return result;
+        }
+
+        std::vector<std::complex<double>> signal(n);
+
+        for (size_t i = 0; i < n; i++) {
+            signal[i] = (bits[i] == '1') ? 1.0 : -1.0;
+        }
+
+        fft(signal);
+
+        const double T = std::sqrt(std::log(20.0) * n);
+
+        size_t count = 0;
+
+        for (size_t i = 0; i < n / 2; i++) {
+            double mag = std::abs(signal[i]);
+
+            if (mag < T)
+                count++;
+        }
+
+        double N0        = 0.95 * n / 2.0;
+        double d         = (count - N0) / std::sqrt(n * 0.95 * 0.05 / 4.0);
+        result.statistic = d;
+        result.pValue    = std::erfc(std::fabs(d) / std::sqrt(2.0));
+        result.passed    = (result.pValue >= 0.01);
+
+        if (result.passed)
+            result.description = "No significant periodic features detected.";
+        else
+            result.description = "Periodic structure detected.";
+
+        return result;
+    }
+
+    //======================================================================
+    // 7. Non-Overlapping Template Matching Test
+    //======================================================================
+
+    TestResult countNonOverlapping(size_t start, size_t length, const std::string &pattern) const {
+        TestResult result;
+        result.name = "Non-Overlapping Template Test (internal)";
+
+        size_t count = 0;
+        size_t i     = start;
+
+        while (i + pattern.size() <= start + length) {
+            bool match = true;
+
+            for (size_t j = 0; j < pattern.size(); j++) {
+                if (bits[i + j] != pattern[j]) {
+                    match = false;
+                    break;
+                }
+            }
+
+            if (match) {
+                count++;
+                i += pattern.size();
+            } else {
+                i++;
+            }
+        }
+
+        result.statistic = static_cast<double>(count);
+        return result;
+    }
+
+    TestResult runNonOverlappingTemplate() {
+        TestResult result;
+        result.name = "Non-Overlapping Template Matching Test";
+
+        const std::string pattern = "000000001"; // canonical 9-bit aperiodic template
+        const size_t m            = pattern.size();
+        const size_t n            = bits.size();
+        const size_t N            = 8; // number of blocks (NIST default)
+        const size_t M            = n / N;
+
+        if (N == 0 || M <= m) {
+            result.description = "Not enough data.";
+            return result;
+        }
+
+        double mu  = static_cast<double>(M - m + 1) / std::pow(2.0, static_cast<double>(m));
+        double var = M * (1.0 / std::pow(2.0, static_cast<double>(m)) - (2.0 * m - 1.0) / std::pow(2.0, 2.0 * m));
+
+        double chi = 0.0;
+
+        for (size_t block = 0; block < N; ++block) {
+            double count = countNonOverlapping(block * M, M, pattern).statistic;
+            double diff  = count - mu;
+            chi += diff * diff / var;
+        }
+
+        result.statistic = chi;
+        result.pValue    = igamc(static_cast<double>(N) / 2.0, chi / 2.0);
+        result.passed    = (result.pValue >= 0.01);
+
+        if (result.passed)
+            result.description = "Template occurrence counts are consistent with randomness.";
+        else
+            result.description = "Template occurs with unusual frequency in one or more blocks.";
+
+        return result;
+    }
+
+    //======================================================================
+    // 8. Overlapping Template Matching Test
+    //======================================================================
+
+    size_t countOverlapping(size_t start, size_t length, const std::string &pattern) const {
+        size_t count = 0;
+
+        for (size_t i = start; i + pattern.size() <= start + length; ++i) {
+            bool match = true;
+
+            for (size_t j = 0; j < pattern.size(); j++) {
+                if (bits[i + j] != pattern[j]) {
+                    match = false;
+                    break;
+                }
+            }
+
+            if (match)
+                ++count;
+        }
+
+        return count;
+    }
+
+    TestResult runOverlappingTemplate() {
+        TestResult result;
+        result.name = "Overlapping Template Test";
+
+        constexpr size_t M       = 1032;
+        constexpr char PATTERN[] = "111111111";
+        const size_t n           = bits.size();
+        const size_t N           = n / M;
+
+        if (N == 0) {
+            result.description = "Not enough data.";
+            return result;
+        }
+
+        int counts[6] = {0};
+
+        for (size_t block = 0; block < N; ++block) {
+            size_t c = countOverlapping(block * M, M, PATTERN);
+
+            if (c >= 5)
+                counts[5]++;
+            else
+                counts[c]++;
+        }
+
+        constexpr double pi[6] = {0.364091, 0.185659, 0.139381, 0.100571, 0.070432, 0.139865};
+
+        double chi = 0.0;
+
+        for (int i = 0; i < 6; i++) {
+            double expected = N * pi[i];
+            double diff     = counts[i] - expected;
+            chi += diff * diff / expected;
+        }
+
+        result.statistic = chi;
+        result.pValue    = igamc(2.5, chi / 2.0);
+        result.passed    = (result.pValue >= 0.01);
+
+        if (result.passed)
+            result.description = "Overlapping template frequencies are consistent with randomness.";
+        else
+            result.description = "Excessive repeated template occurrences detected.";
+
+        return result;
+    }
+
+    //======================================================================
+    // 9. Maurer's Universal Statistical Test
+    //======================================================================
+
+    TestResult runMaurer() {
+        TestResult result;
+        result.name = "Maurer's Universal Test";
+
+        constexpr int L          = 8;
+        constexpr int Q          = 2560;
+        const size_t totalBlocks = bits.size() / L;
+
+        if (totalBlocks <= Q) {
+            result.description = "Not enough data.";
+            return result;
+        }
+
+        const size_t K = totalBlocks - Q;
+        std::vector<int> lastSeen(1 << L, -1);
+
+        for (int i = 0; i < Q; i++) {
+            int value = 0;
+
+            for (int b = 0; b < L; b++) {
+                value <<= 1;
+
+                if (bits[i * L + b] == '1')
+                    value |= 1;
+            }
+
+            lastSeen[value] = i;
+        }
+
+        double sum = 0.0;
+
+        for (size_t i = Q; i < totalBlocks; i++) {
+            int value = 0;
+
+            for (int b = 0; b < L; b++) {
+                value <<= 1;
+
+                if (bits[i * L + b] == '1')
+                    value |= 1;
+            }
+
+            int distance = static_cast<int>(i) - lastSeen[value];
+            sum += std::log2(distance);
+            lastSeen[value] = static_cast<int>(i);
+        }
+
+        double fn        = sum / K;
+        result.statistic = fn;
+
+        constexpr double expected = 7.1836656;
+        constexpr double variance = 3.238;
+        double sigma              = std::sqrt(variance / K);
+
+        result.pValue = std::erfc(std::fabs(fn - expected) / (std::sqrt(2.0) * sigma));
+        result.passed = result.pValue >= 0.01;
+
+        if (result.passed)
+            result.description = "Sequence exhibits expected universal behavior.";
+        else
+            result.description = "Sequence appears overly compressible.";
+
+        return result;
+    }
+
+    //======================================================================
+    // 10. Linear Complexity Test (Berlekamp-Massey)
+    //======================================================================
+
+    int berlekampMassey(const std::vector<int> &s) const {
+        const int n = static_cast<int>(s.size());
+
+        std::vector<int> C(n, 0);
+        std::vector<int> B(n, 0);
+
+        C[0] = 1;
+        B[0] = 1;
+
+        int L = 0;
+        int m = -1;
+
+        for (int N = 0; N < n; N++) {
+            int d = s[N];
+
+            for (int i = 1; i <= L; i++)
+                d ^= (C[i] & s[N - i]);
+
+            if (d) {
+                auto T = C;
+
+                for (int j = 0; j < n - (N - m); j++)
+                    C[N - m + j] ^= B[j];
+
+                if (L <= N / 2) {
+                    L = N + 1 - L;
+                    m = N;
+                    B = T;
+                }
+            }
+        }
+
+        return L;
+    }
+
+    TestResult runLinearComplexity() {
+        TestResult result;
+        result.name = "Linear Complexity Test";
+
+        constexpr int M = 500; // block size (NIST default)
+        const size_t n  = bits.size();
+        const size_t N  = n / M;
+
+        if (N == 0) {
+            result.description = "Not enough data.";
+            return result;
+        }
+
+        constexpr double pi[7] = {0.01047, 0.03125, 0.12500, 0.50000, 0.25000, 0.06250, 0.020833};
+        std::array<int, 7> v{};
+
+        double signM1 = (M % 2 == 0) ? -1.0 : 1.0; // (-1)^(M+1), used in mu
+        double signM  = -signM1;                   // (-1)^M, used in T
+        double mu     = (M / 2.0) + (9.0 + signM1) / 36.0 - ((M / 3.0) + (2.0 / 9.0)) / std::pow(2.0, static_cast<double>(M));
+
+        for (size_t block = 0; block < N; ++block) {
+            std::vector<int> s(M);
+
+            for (int i = 0; i < M; ++i)
+                s[i] = (bits[block * M + i] == '1') ? 1 : 0;
+
+            int L    = berlekampMassey(s);
+            double T = signM * (L - mu) + 2.0 / 9.0;
+
+            int bin;
+
+            if (T <= -2.5)
+                bin = 0;
+            else if (T <= -1.5)
+                bin = 1;
+            else if (T <= -0.5)
+                bin = 2;
+            else if (T <= 0.5)
+                bin = 3;
+            else if (T <= 1.5)
+                bin = 4;
+            else if (T <= 2.5)
+                bin = 5;
+            else
+                bin = 6;
+
+            v[bin]++;
+        }
+
+        double chi = 0.0;
+
+        for (int i = 0; i < 7; ++i) {
+            double expected = N * pi[i];
+            double diff     = v[i] - expected;
+            chi += diff * diff / expected;
+        }
+
+        result.statistic = chi;
+        result.pValue    = igamc(3.0, chi / 2.0);
+        result.passed    = (result.pValue >= 0.01);
+
+        if (result.passed)
+            result.description = "Linear complexity values are consistent with randomness.";
+        else
+            result.description = "Linear complexity distribution deviates from randomness.";
+
+        return result;
+    }
+
+    //======================================================================
+    // 11. Serial Test
+    //======================================================================
+
+    double psiSquared(int m) const {
+        if (m <= 0)
+            return 0.0;
+
+        const size_t n     = bits.size();
+        const int patterns = 1 << m;
+        std::vector<int> counts(patterns, 0);
+
+        for (size_t i = 0; i < n; ++i) {
+            int value = 0;
+
+            for (int j = 0; j < m; ++j) {
+                value <<= 1;
+                size_t index = (i + j) % n;
+
+                if (bits[index] == '1')
+                    value |= 1;
+            }
+
+            counts[value]++;
+        }
+
+        double sum = 0.0;
+
+        for (int c : counts)
+            sum += static_cast<double>(c) * c;
+
+        return (sum * patterns / n) - n;
+    }
+
+    TestResult runSerial() {
+        TestResult result;
+        result.name = "Serial Test";
+
+        constexpr int m = 2; // small block length, general-purpose default
+        const size_t n  = bits.size();
+
+        if (n < static_cast<size_t>(1 << (m + 1))) {
+            result.description = "Not enough data.";
+            return result;
+        }
+
+        double psiM  = psiSquared(m);
+        double psiM1 = psiSquared(m - 1);
+        double psiM2 = psiSquared(m - 2);
+
+        double deltaPsi  = psiM - psiM1;
+        double delta2Psi = psiM - 2.0 * psiM1 + psiM2;
+
+        double p1 = igamc(std::pow(2.0, m - 1) / 2.0, deltaPsi / 2.0);
+        double p2 = igamc(std::pow(2.0, m - 2) / 2.0, delta2Psi / 2.0);
+
+        result.statistic = deltaPsi;
+        result.pValue    = std::min(p1, p2);
+        result.passed    = (p1 >= 0.01 && p2 >= 0.01);
+
+        if (result.passed)
+            result.description = "Overlapping m-bit pattern frequencies are consistent with randomness.";
+        else
+            result.description = "Overlapping m-bit pattern frequencies deviate from randomness.";
+
+        return result;
+    }
+
+    //======================================================================
+    // 12. Approximate Entropy Test
+    //======================================================================
+
+    double phiM(int m) const {
+        const size_t n     = bits.size();
+        const int patterns = 1 << m;
+        std::vector<int> counts(patterns, 0);
+
+        for (size_t i = 0; i < n; i++) {
+            int value = 0;
+
+            for (int j = 0; j < m; j++) {
+                value <<= 1;
+
+                if (bits[(i + j) % n] == '1')
+                    value |= 1;
+            }
+
+            counts[value]++;
+        }
+
+        double sum = 0.0;
+
+        for (int c : counts) {
+            if (c > 0) {
+                double p = static_cast<double>(c) / n;
+                sum += p * std::log(p);
+            }
+        }
+
+        return sum;
+    }
+
+    TestResult runApproximateEntropy() {
+        TestResult result;
+        result.name = "Approximate Entropy Test";
+
+        constexpr int m = 2; // small block length, general-purpose default
+        const size_t n  = bits.size();
+
+        if (n < static_cast<size_t>(1 << (m + 2))) {
+            result.description = "Not enough data.";
+            return result;
+        }
+
+        double apEn = phiM(m) - phiM(m + 1);
+        double chi  = 2.0 * n * (std::log(2.0) - apEn);
+
+        result.statistic = chi;
+        result.pValue    = igamc(std::pow(2.0, m - 1), chi / 2.0);
+        result.passed    = (result.pValue >= 0.01);
+
+        if (result.passed)
+            result.description = "Approximate entropy is consistent with randomness.";
+        else
+            result.description = "Approximate entropy deviates from randomness.";
+
+        return result;
+    }
+
+    //======================================================================
+    // 13. Cumulative Sums (Cusum) Test
+    //======================================================================
+
+    TestResult runCumulativeSums() {
+        TestResult result;
+        result.name = "Cumulative Sums Test";
+
+        const size_t n = bits.size();
+
+        if (n == 0) {
+            result.description = "No data.";
+            return result;
+        }
+
+        int sum = 0;
+        int z   = 0;
+
+        for (char bit : bits) {
+            sum += (bit == '1') ? 1 : -1;
+            z = std::max(z, std::abs(sum));
+        }
+
+        result.statistic = z;
+
+        auto Phi = [](double x) {
+            return 0.5 * std::erfc(-x / std::sqrt(2.0));
+        };
+
+        double nD = static_cast<double>(n);
+        double zD = static_cast<double>(z);
+
+        double p = 1.0;
+
+        int kStart1 = static_cast<int>(std::floor((-nD / zD + 1.0) / 4.0));
+        int kEnd1   = static_cast<int>(std::floor((nD / zD - 1.0) / 4.0));
+
+        for (int k = kStart1; k <= kEnd1; k++) {
+            p -= Phi((4 * k + 1) * zD / std::sqrt(nD));
+            p += Phi((4 * k - 1) * zD / std::sqrt(nD));
+        }
+
+        int kStart2 = static_cast<int>(std::floor((-nD / zD - 3.0) / 4.0));
+        int kEnd2   = static_cast<int>(std::floor((nD / zD - 1.0) / 4.0));
+
+        for (int k = kStart2; k <= kEnd2; k++) {
+            p += Phi((4 * k + 3) * zD / std::sqrt(nD));
+            p -= Phi((4 * k + 1) * zD / std::sqrt(nD));
+        }
+
+        result.pValue = p;
+        result.passed = (p >= 0.01);
+
+        if (result.passed)
+            result.description = "Random walk is consistent with randomness.";
+        else
+            result.description = "Random walk exhibits excessive drift.";
+
+        return result;
+    }
+
+    //======================================================================
+    // 14. Random Excursions Test
+    //======================================================================
+
+    TestResult runRandomExcursions() {
+        TestResult result;
+        result.name = "Random Excursions Test";
+
+        // Build the cumulative-sum walk, padded with a 0 at both ends so
+        // every excursion away from zero is bracketed by zeros.
+        std::vector<int> walk;
+        walk.reserve(bits.size() + 2);
+        walk.push_back(0);
+
+        int sum = 0;
+
+        for (char bit : bits) {
+            sum += (bit == '1') ? 1 : -1;
+            walk.push_back(sum);
+        }
+
+        walk.push_back(0);
+
+        // Extract cycles: the values strictly between two consecutive
+        // zeros form one cycle (an "excursion").
+        std::vector<std::vector<int>> cycles;
+        std::vector<int> current;
+
+        for (size_t i = 1; i < walk.size(); ++i) {
+            if (walk[i] == 0) {
+                if (!current.empty()) {
+                    cycles.push_back(current);
+                    current.clear();
+                }
+            } else {
+                current.push_back(walk[i]);
+            }
+        }
+
+        const int J = static_cast<int>(cycles.size());
+
+        if (J < 500) {
+            result.statistic   = J;
+            result.description = "Insufficient cycles (need at least 500).";
+            return result;
+        }
+
+        constexpr int states[8] = {-4, -3, -2, -1, 1, 2, 3, 4};
+
+        double worst = 1.0;
+
+        for (int x : states) {
+            // v[k] = number of cycles with exactly k visits to state x
+            // (k == 5 represents "5 or more visits").
+            std::array<int, 6> v{};
+
+            for (const auto &cycle : cycles) {
+                int visits = 0;
+
+                for (int value : cycle) {
+                    if (value == x)
+                        ++visits;
+                }
+
+                v[std::min(visits, 5)]++;
+            }
+
+            double absX = std::fabs(static_cast<double>(x));
+            double p0   = 1.0 / (2.0 * absX);
+
+            double chi = 0.0;
+
+            for (int k = 0; k <= 5; ++k) {
+                double pi;
+
+                if (k == 0)
+                    pi = 1.0 - p0;
+                else if (k < 5)
+                    pi = (1.0 / (4.0 * absX * absX)) * std::pow(1.0 - p0, k - 1);
+                else
+                    pi = p0 * std::pow(1.0 - p0, 4);
+
+                double expected = J * pi;
+                double diff     = v[k] - expected;
+                chi += diff * diff / expected;
+            }
+
+            double pValue = igamc(2.5, chi / 2.0);
+
+            if (pValue < worst)
+                worst = pValue;
+        }
+
+        result.statistic = J;
+        result.pValue    = worst;
+        result.passed    = (worst >= 0.01);
+
+        if (result.passed)
+            result.description = "State visit frequencies across excursions are consistent with randomness.";
+        else
+            result.description = "State visit frequencies across excursions deviate from randomness.";
+
+        return result;
+    }
+
+    //======================================================================
+    // 15. Random Excursions Variant Test
+    //======================================================================
+
+    TestResult runRandomExcursionsVariant() {
+        TestResult result;
+        result.name = "Random Excursions Variant Test";
+
+        std::vector<int> walk;
+        walk.reserve(bits.size() + 1);
+        walk.push_back(0);
+
+        int sum = 0;
+
+        for (char bit : bits) {
+            sum += (bit == '1') ? 1 : -1;
+            walk.push_back(sum);
+        }
+
+        int J = 0;
+
+        for (int x : walk) {
+            if (x == 0)
+                ++J;
+        }
+
+        if (J < 500) {
+            result.statistic   = J;
+            result.description = "Insufficient cycles.";
+            return result;
+        }
+
+        std::array<int, 19> visits{};
+
+        for (int x : walk) {
+            if (x >= -9 && x <= 9 && x != 0) {
+                visits[x + 9]++;
+            }
+        }
+
+        double worst = 1.0;
+
+        for (int state = -9; state <= 9; ++state) {
+            if (state == 0)
+                continue;
+
+            double numerator   = std::fabs(visits[state + 9] - J);
+            double denominator = std::sqrt(2.0 * J * (4.0 * std::abs(state) - 2.0));
+            double p           = std::erfc(numerator / denominator);
+
+            if (p < worst)
+                worst = p;
+        }
+
+        result.statistic = J;
+        result.pValue    = worst;
+        result.passed    = (worst >= 0.01);
+
+        if (result.passed)
+            result.description = "State visit frequencies are consistent with randomness.";
+        else
+            result.description = "State visit frequencies are inconsistent with randomness.";
+
+        return result;
     }
 };
 
@@ -577,7 +1834,6 @@ class RandomNumberGenerator {
     CRYPTO::SHA256 sha;
     SystemClock systemClock;
 
-    static constexpr int update_interval       = 10;   // update the progress bar every 10 iterations
     static constexpr int totalIterations       = 1024; // total number of timing samples drawn per run()
     static constexpr size_t localBufferSize    = 512;  // ring buffer capacity — holds the last 512 raw entropy bits, hashed together to whiten/condition the output
     std::array<int, localBufferSize> localBits = {};   // the ring buffer itself — one int (0/1) per bit; array chosen over vector for fixed size + speed
@@ -860,6 +2116,14 @@ int main() {
 
     analyzer.feedBits(entropy); // add the entropy output to check the distribution across bytes
     analyzer.print();           // print the distribution table
+
+    TestNIST tester(entropy);
+    tester.runAll();
+
+    for (const auto &r : tester.getResults()) {
+        std::cout << std::left << std::setw(45) << r.name << " | stat=" << std::setw(12) << r.statistic << " p=" << std::setw(10) << r.pValue << " " << (r.passed ? "PASS" : "FAIL")
+                  << " (" << r.description << ")\n";
+    }
 
     std::cout << "\nProgram finished. Press Enter to exit..." << std::endl;
     std::cin.get();
