@@ -113,7 +113,8 @@
 // Global Type Aliases
 //----------------------------------------------------------------------------------
 
-using Bytes = std::vector<uint8_t>; // Convenience alias for a byte buffer
+using Bytes    = std::vector<uint8_t>; // Convenience alias for a byte buffer
+using Matrix32 = std::array<std::bitset<32>, 32>;
 
 //----------------------------------------------------------------------------------
 // Macros: Version
@@ -277,7 +278,7 @@ class EntropyAnalyzer {
         std::cout << "Min frequency: " << minFreq << "  (" << std::fixed << std::setprecision(3) << (static_cast<double>(minFreq) / totalBytes * 100.0) << "%)\n";
         std::cout << "Max frequency: " << maxFreq << "  (" << std::fixed << std::setprecision(3) << (static_cast<double>(maxFreq) / totalBytes * 100.0) << "%)\n";
         std::cout << "Std deviation: " << std::fixed << std::setprecision(2) << stddev << " bytes\n";
-        std::cout << "Ideal uniform: " << std::fixed << std::setprecision(2) << mean << " bytes per value\n";
+        std::cout << "Ideal uniform: " << std::fixed << std::setprecision(2) << mean << " bytes per value\n\n";
     }
 
   private:
@@ -322,6 +323,138 @@ class SecureMemory {
 //----------------------------------------------------------------------------------
 //----------------------------------------------------------------------------------
 
+// void runAll() {
+//     results.clear();
+
+//     std::cout << "\nInitiating NIST Statistical Test Suite (STS)...\n\n";
+//     std::cout << "NIST Special Publication 800-22 Revision 1a (SP 800-22 Rev. 1a)";
+
+//     std::cout << "[ 1/15] Frequency (Monobit) Test...\n";
+//     results.push_back(runFrequency());
+
+//     std::cout << "[ 2/15] Block Frequency Test...\n";
+//     results.push_back(runBlockFrequency());
+
+//     std::cout << "[ 3/15] Runs Test...\n";
+//     results.push_back(runRuns());
+
+//     std::cout << "[ 4/15] Longest Run of Ones Test...\n";
+//     results.push_back(runLongestRun());
+
+//     std::cout << "[ 5/15] Binary Matrix Rank Test...\n";
+//     results.push_back(runMatrixRank());
+
+//     std::cout << "[ 6/15] Discrete Fourier Transform (Spectral) Test...\n";
+//     results.push_back(runDFT());
+
+//     std::cout << "[ 7/15] Non-Overlapping Template Matching Test...\n";
+//     results.push_back(runNonOverlappingTemplate());
+
+//     std::cout << "[ 8/15] Overlapping Template Matching Test...\n";
+//     results.push_back(runOverlappingTemplate());
+
+//     std::cout << "[ 9/15] Maurer's Universal Statistical Test...\n";
+//     results.push_back(runMaurer());
+
+//     std::cout << "[10/15] Linear Complexity Test...\n";
+//     results.push_back(runLinearComplexity());
+
+//     std::cout << "[11/15] Serial Test...\n";
+//     results.push_back(runSerial());
+
+//     std::cout << "[12/15] Approximate Entropy Test...\n";
+//     results.push_back(runApproximateEntropy());
+
+//     std::cout << "[13/15] Cumulative Sums (Cusum) Test...\n";
+//     results.push_back(runCumulativeSums());
+
+//     std::cout << "[14/15] Random Excursions Test...\n";
+//     results.push_back(runRandomExcursions());
+
+//     std::cout << "[15/15] Random Excursions Variant Test...\n";
+//     results.push_back(runRandomExcursionsVariant());
+
+//     std::cout << "\nNIST Statistical Test Suite complete.\n";
+// }
+
+// void runAll() {
+//     results.clear();
+
+//     constexpr int TOTAL_TESTS = 15;
+//     int currentTest           = 0;
+
+//     std::cout << "\n";
+//     std::cout << "===================================================================\n";
+//     std::cout << "        Initiating NIST Statistical Test Suite (STS)...\n";
+//     std::cout << "  NIST Special Publication 800-22 Revision 1a (SP 800-22 Rev. 1a)\n";
+//     std::cout << "===================================================================\n\n";
+
+//     functions.printProgressBar(currentTest, TOTAL_TESTS);
+//     std::cout << "\n\n";
+
+//     std::cout << "[ 1/15] Frequency (Monobit) Test...\n";
+//     results.push_back(runFrequency());
+//     functions.printProgressBar(++currentTest, TOTAL_TESTS);
+
+//     std::cout << "\n[ 2/15] Frequency Test Within a Block...\n";
+//     results.push_back(runBlockFrequency());
+//     functions.printProgressBar(++currentTest, TOTAL_TESTS);
+
+//     std::cout << "\n[ 3/15] Runs Test...\n";
+//     results.push_back(runRuns());
+//     functions.printProgressBar(++currentTest, TOTAL_TESTS);
+
+//     std::cout << "\n[ 4/15] Longest Run of Ones in a Block Test...\n";
+//     results.push_back(runLongestRun());
+//     functions.printProgressBar(++currentTest, TOTAL_TESTS);
+
+//     std::cout << "\n[ 5/15] Binary Matrix Rank Test...\n";
+//     results.push_back(runMatrixRank());
+//     functions.printProgressBar(++currentTest, TOTAL_TESTS);
+
+//     std::cout << "\n[ 6/15] Discrete Fourier Transform (Spectral) Test...\n";
+//     results.push_back(runDFT());
+//     functions.printProgressBar(++currentTest, TOTAL_TESTS);
+
+//     std::cout << "\n[ 7/15] Non-Overlapping Template Matching Test...\n";
+//     results.push_back(runNonOverlappingTemplate());
+//     functions.printProgressBar(++currentTest, TOTAL_TESTS);
+
+//     std::cout << "\n[ 8/15] Overlapping Template Matching Test...\n";
+//     results.push_back(runOverlappingTemplate());
+//     functions.printProgressBar(++currentTest, TOTAL_TESTS);
+
+//     std::cout << "\n[ 9/15] Maurer's Universal Statistical Test...\n";
+//     results.push_back(runMaurer());
+//     functions.printProgressBar(++currentTest, TOTAL_TESTS);
+
+//     std::cout << "\n[10/15] Linear Complexity Test...\n";
+//     results.push_back(runLinearComplexity());
+//     functions.printProgressBar(++currentTest, TOTAL_TESTS);
+
+//     std::cout << "\n[11/15] Serial Test...\n";
+//     results.push_back(runSerial());
+//     functions.printProgressBar(++currentTest, TOTAL_TESTS);
+
+//     std::cout << "\n[12/15] Approximate Entropy Test...\n";
+//     results.push_back(runApproximateEntropy());
+//     functions.printProgressBar(++currentTest, TOTAL_TESTS);
+
+//     std::cout << "\n[13/15] Cumulative Sums (Cusum) Test...\n";
+//     results.push_back(runCumulativeSums());
+//     functions.printProgressBar(++currentTest, TOTAL_TESTS);
+
+//     std::cout << "\n[14/15] Random Excursions Test...\n";
+//     results.push_back(runRandomExcursions());
+//     functions.printProgressBar(++currentTest, TOTAL_TESTS);
+
+//     std::cout << "\n[15/15] Random Excursions Variant Test...\n";
+//     results.push_back(runRandomExcursionsVariant());
+//     functions.printProgressBar(++currentTest, TOTAL_TESTS);
+
+//     std::cout << "\n\nNIST Statistical Test Suite complete.\n";
+// }
+
 class TestNIST {
   public:
     explicit TestNIST(const std::string &bits)
@@ -335,34 +468,166 @@ class TestNIST {
         std::string description;
     };
 
+    //======================================================================
+    // Draw NIST Statistical Test Suite Dashboard
+    //======================================================================
+
+    static constexpr int LINE_WIDTH = 90; // wide enough to blank out any leftover text
+
+    // Writes one line, padded with spaces to LINE_WIDTH so stale
+    // characters from a previous (longer) frame get erased without
+    // ever calling a screen-clear function.
+    void printLine(const std::string &text) {
+        std::string padded = text;
+        if (padded.size() < LINE_WIDTH)
+            padded.append(LINE_WIDTH - padded.size(), ' ');
+        std::cout << padded << '\n';
+    }
+
+    void drawProgress(int currentTest, int totalTests, const std::vector<std::string> &completedTests, const std::string &currentTestName) {
+        HANDLE hConsole = GetStdHandle(STD_OUTPUT_HANDLE);
+
+        // Anchor to wherever the dashboard actually started, not (0,0).
+        SetConsoleCursorPosition(hConsole, dashboardOrigin);
+
+        printLine("===================================================================");
+        printLine("                NIST Statistical Test Suite (STS)");
+        printLine("          NIST SP 800-22 Revision 1a (SP 800-22 Rev. 1a)");
+        printLine("===================================================================");
+        printLine("");
+        printLine("Overall Progress");
+
+        // Capture the progress bar text instead of letting it print
+        // directly, so we can pad it like everything else.
+        {
+            std::ostringstream oss;
+            auto *old = std::cout.rdbuf(oss.rdbuf());
+            functions.printProgressBar(currentTest, totalTests);
+            std::cout.rdbuf(old);
+            printLine(oss.str());
+        }
+
+        printLine("");
+        printLine("Completed Tests");
+        printLine("-------------------------------------------------------------------");
+
+        // Fixed-height block: always print exactly `totalTests` lines
+        // so the layout below never shifts between frames.
+        for (int i = 0; i < totalTests; ++i) {
+            if (i < static_cast<int>(completedTests.size()))
+                printLine("[DONE] " + completedTests[i]); // ✓
+            else
+                printLine("");
+        }
+
+        printLine("");
+        printLine("Currently Running");
+        printLine("-------------------------------------------------------------------");
+
+        if (currentTest < totalTests)
+            printLine(currentTestName); // →
+        else
+            printLine("All tests complete.");
+
+        std::cout.flush();
+    }
+
+    //======================================================================
+    // Execute NIST Statistical Test Suite
+    //======================================================================
+
     void runAll() {
+
         results.clear();
 
+        constexpr int TOTAL_TESTS = 15;
+
+        int currentTest = 0;
+
+        std::vector<std::string> completedTests;
+
+        // Anchor the dashboard to whatever line the cursor is on
+        // *right now* (below the banner/entropy info/byte table that
+        // was already printed), instead of hardcoding {0,0}.
+        HANDLE hConsole = GetStdHandle(STD_OUTPUT_HANDLE);
+        CONSOLE_SCREEN_BUFFER_INFO csbi;
+        GetConsoleScreenBufferInfo(hConsole, &csbi);
+        dashboardOrigin = csbi.dwCursorPosition;
+
+        drawProgress(currentTest, TOTAL_TESTS, completedTests, "Frequency (Monobit) Test");
+
         results.push_back(runFrequency());
+        completedTests.push_back("Frequency (Monobit) Test");
+        drawProgress(++currentTest, TOTAL_TESTS, completedTests, "Frequency Test Within a Block");
+
         results.push_back(runBlockFrequency());
+        completedTests.push_back("Frequency Test Within a Block");
+        drawProgress(++currentTest, TOTAL_TESTS, completedTests, "Runs Test");
+
         results.push_back(runRuns());
+        completedTests.push_back("Runs Test");
+        drawProgress(++currentTest, TOTAL_TESTS, completedTests, "Longest Run of Ones in a Block Test");
+
         results.push_back(runLongestRun());
+        completedTests.push_back("Longest Run of Ones in a Block Test");
+        drawProgress(++currentTest, TOTAL_TESTS, completedTests, "Binary Matrix Rank Test");
+
         results.push_back(runMatrixRank());
-        results.push_back(runDFT()); // Discrete Fourier Transform
+        completedTests.push_back("Binary Matrix Rank Test");
+        drawProgress(++currentTest, TOTAL_TESTS, completedTests, "Discrete Fourier Transform (Spectral) Test");
+
+        results.push_back(runDFT());
+        completedTests.push_back("Discrete Fourier Transform (Spectral) Test");
+        drawProgress(++currentTest, TOTAL_TESTS, completedTests, "Non-Overlapping Template Matching Test");
+
         results.push_back(runNonOverlappingTemplate());
+        completedTests.push_back("Non-Overlapping Template Matching Test");
+        drawProgress(++currentTest, TOTAL_TESTS, completedTests, "Overlapping Template Matching Test");
+
         results.push_back(runOverlappingTemplate());
+        completedTests.push_back("Overlapping Template Matching Test");
+        drawProgress(++currentTest, TOTAL_TESTS, completedTests, "Maurer's Universal Statistical Test");
+
         results.push_back(runMaurer());
+        completedTests.push_back("Maurer's Universal Statistical Test");
+        drawProgress(++currentTest, TOTAL_TESTS, completedTests, "Linear Complexity Test");
+
         results.push_back(runLinearComplexity());
+        completedTests.push_back("Linear Complexity Test");
+        drawProgress(++currentTest, TOTAL_TESTS, completedTests, "Serial Test");
+
         results.push_back(runSerial());
+        completedTests.push_back("Serial Test");
+        drawProgress(++currentTest, TOTAL_TESTS, completedTests, "Approximate Entropy Test");
+
         results.push_back(runApproximateEntropy());
+        completedTests.push_back("Approximate Entropy Test");
+        drawProgress(++currentTest, TOTAL_TESTS, completedTests, "Cumulative Sums (Cusum) Test");
+
         results.push_back(runCumulativeSums());
+        completedTests.push_back("Cumulative Sums (Cusum) Test");
+        drawProgress(++currentTest, TOTAL_TESTS, completedTests, "Random Excursions Test");
+
         results.push_back(runRandomExcursions());
+        completedTests.push_back("Random Excursions Test");
+        drawProgress(++currentTest, TOTAL_TESTS, completedTests, "Random Excursions Variant Test");
+
         results.push_back(runRandomExcursionsVariant());
+        completedTests.push_back("Random Excursions Variant Test");
+        drawProgress(++currentTest, TOTAL_TESTS, completedTests, "");
+
+        std::cout << "\n\n";
+        std::cout << "NIST Statistical Test Suite completed successfully.\n\n";
     }
 
     const std::vector<TestResult> &getResults() const { return results; }
 
   private:
+    Functions functions;
     std::string bits;
     std::vector<TestResult> results;
+    COORD dashboardOrigin{0, 0};
     static constexpr double PI = 3.14159265358979323846;
-
-    using Matrix32 = std::array<std::bitset<32>, 32>;
 
     //======================================================================
     // Shared math helpers (regularized incomplete gamma function, used by
