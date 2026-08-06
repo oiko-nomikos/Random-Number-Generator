@@ -1,13 +1,7 @@
 
-// =================================================================================
-//
-// Oikos Random Number Generator
-// Copyright (c) 2026 oiko-nomikos
-//
-// Licensed under the MIT License.
-// SPDX-License-Identifier: MIT
-//
-// See the LICENSE file in the project root for the full license text.
+//----------------------------------------------------------------------------------
+//----------------------------------------------------------------------------------
+//----------------------------------------------------------------------------------
 //
 // =================================================================================
 //
@@ -30,7 +24,7 @@
 //
 // CRITICAL WARNING:
 // ---------------------------------------------------------------------------------
-// THIS IS NOT PRODUCTION-GRADE CRYPTOGRAPHY - NOT YET!
+// THIS IS NOT PRODUCTION-GRADE CRYPTOGRAPHY.
 //
 // Discretion must be given - use at own risk!
 //
@@ -40,21 +34,96 @@
 //----------------------------------------------------------------------------------
 //----------------------------------------------------------------------------------
 
-// === Core C++ Input/Output and Strings ===
-#include <fstream>  // std::ifstream, std::ofstream — file I/O
-#include <iostream> // std::cout, std::cin — console I/O
-#include <string>   // std::string — string handling
-#include <iomanip>  // std::setw, std::setprecision — formatted output
+//----------------------------------------------------------------------------------
+// Core C++ Input / Output and Strings
+//----------------------------------------------------------------------------------
 
-// === Containers and Data Structures ===
-#include <vector> // std::vector — dynamic arrays
-#include <deque>  // std::deque — double-ended queues (used for entropy pools)
+#include <fstream>  // std::ifstream, std::ofstream — file input/output
+#include <iostream> // std::cout, std::cin, std::cerr — console input/output
+#include <iomanip>  // std::setw, std::setfill, std::setprecision — formatted output
+#include <string>   // std::string — dynamic string class
+#include <limits>   // std::numeric_limits — type limits and stream utilities
 
-// === Timing and Delays ===
-#include <chrono> // std::chrono::high_resolution_clock — precise timing
+//----------------------------------------------------------------------------------
+// Containers and Data Structures
+//----------------------------------------------------------------------------------
 
-// === Multithreading and Synchronization ===
-#include <mutex> // std::mutex — mutual exclusion
+#include <vector> // std::vector — dynamic contiguous array
+#include <deque>  // std::deque — double-ended queue
+#include <array>  // std::array — fixed-size array
+#include <bitset> // std::bitset — fixed-size bit manipulation
+
+//----------------------------------------------------------------------------------
+// Algorithms
+//----------------------------------------------------------------------------------
+
+#include <algorithm> // std::sort, std::max, std::min, std::clamp, std::swap, etc.
+
+//----------------------------------------------------------------------------------
+// Mathematics
+//----------------------------------------------------------------------------------
+
+#include <cmath>   // std::sqrt, std::pow, std::log, std::exp, std::erfc, etc.
+#include <complex> // std::complex — complex numbers (used by FFT/DFT)
+#include <random>  // Random number engines and statistical distributions
+
+//----------------------------------------------------------------------------------
+// Timing
+//----------------------------------------------------------------------------------
+
+#include <chrono> // std::chrono — clocks, durations, and timing utilities
+
+//----------------------------------------------------------------------------------
+// Thread Synchronisation
+//----------------------------------------------------------------------------------
+
+#include <mutex> // std::mutex, std::lock_guard, std::unique_lock
+
+//----------------------------------------------------------------------------------
+// Windows API
+//----------------------------------------------------------------------------------
+
+#define WIN32_LEAN_AND_MEAN // Exclude rarely used Windows headers to reduce compile time
+#include <windows.h>        // Windows API (VirtualLock, VirtualUnlock, Sleep, etc.)
+
+//----------------------------------------------------------------------------------
+// Global Type Aliases
+//----------------------------------------------------------------------------------
+
+using Bytes    = std::vector<uint8_t>; // Convenience alias for a byte buffer
+using Matrix32 = std::array<std::bitset<32>, 32>;
+
+//----------------------------------------------------------------------------------
+// Macros: Version
+//----------------------------------------------------------------------------------
+
+#define CSPRNG_VERSION "v0.1.0"
+
+//----------------------------------------------------------------------------------
+// Windows Specific Utilities
+//----------------------------------------------------------------------------------
+
+void maximizeConsoleWindow() {
+#ifdef _WIN32
+    HWND consoleWindow = GetConsoleWindow();
+
+    if (consoleWindow != nullptr) {
+        ShowWindow(consoleWindow, SW_MAXIMIZE);
+    }
+#endif
+}
+
+//----------------------------------------------------------------------------------
+//----------------------------------------------------------------------------------
+//----------------------------------------------------------------------------------
+
+class SystemClock {
+  public:
+    inline long long getNanoseconds() {
+        auto now = std::chrono::high_resolution_clock::now();
+        return std::chrono::duration_cast<std::chrono::nanoseconds>(now.time_since_epoch()).count();
+    }
+};
 
 //----------------------------------------------------------------------------------
 //----------------------------------------------------------------------------------
@@ -300,10 +369,11 @@ class TestNIST {
         printLine("Currently Running");
         printLine("-------------------------------------------------------------------");
 
-        if (currentTest < totalTests)
-            printLine(currentTestName); // →
-        else
+        if (currentTest < totalTests) {
+            printLine(currentTestName);
+        } else {
             printLine("All tests complete.");
+        }
 
         std::cout.flush();
     }
@@ -1858,12 +1928,17 @@ class RandomNumberGenerator {
                 head = (head + 1) % localBufferSize;
             }
 
+            // Warm-up runs from i = 0 .. warmupIterations-1: buffer fills (by i = 511)
+            // and globalAvg keeps converging, but nothing is hashed yet.
+            // Once i >= warmupIterations, every remaining iteration hashes —
+            // the buffer is already guaranteed full by then...
+            // Only start emitting digests once we're past the warm-up period.
             // once full, every iteration represents one full 512-bit sliding window (oldest -> newest),
             // 512 bits = 2^512 = 64 bytes, which is exactly what SHA-256 expects as input.
             // this is an astronimcally large number of combinations, so the output is effectively "whitened" and conditioned.
             // in scientific notation, 2⁵¹² ≈ 1.34 × 10¹⁵⁴ which is a 155 digit long number so large that it is effectively impossible to brute-force or predict.
             // we now hash it every time to keep the output stream continuously fed with fresh digests.
-            if (filled) {
+            if (i >= warmupIterations) {
                 result += hashLocalBits();
             }
         }
@@ -1875,18 +1950,15 @@ class RandomNumberGenerator {
     CRYPTO::SHA256 sha;
     SystemClock systemClock;
 
-    static constexpr int totalIterations       = 1024; // total number of timing samples drawn per run()
-    static constexpr size_t localBufferSize    = 512;  // ring buffer capacity — holds the last 512 raw entropy bits, hashed together to whiten/condition the output
-    std::array<int, localBufferSize> localBits = {};   // the ring buffer itself — one int (0/1) per bit; array chosen over vector for fixed size + speed
-    static constexpr size_t total              = 256;  // SHA-256 digest size in bits — size of each unit of output this class produces
-    static constexpr int byte64                = 64;   // 512 bits (localBufferSize) expressed in bytes — what actually gets fed into SHA256::update()
-
-    // NOTE: this is a lower-bound estimate for reserve(), not an exact count.
-    // filled flips true partway through iteration (localBufferSize - 1), so hashing actually starts
-    // one iteration earlier than this subtraction assumes — actual output is expectedBits + one extra digest.
-    // localBufferSize - 1 = 511 is the last valid index, precisely because of 0-indexing.
-    static constexpr size_t producingIterations = totalIterations - localBufferSize;
-    static constexpr size_t expectedBits        = producingIterations * total;
+    static constexpr int warmupBytes           = 1250;            // warm-up period in bytes, 10,000 bits pass through local buffer
+    static constexpr int warmupIterations      = warmupBytes * 8; // 10,000 bits
+    static constexpr int localBufferSize       = 512;             // ring buffer capacity — holds the last 512 raw entropy bits, hashed together to whiten/condition the output
+    std::array<int, localBufferSize> localBits = {};              // the ring buffer itself — one int (0/1) per bit; array chosen over vector for fixed size + speed
+    static constexpr int total                 = 256;             // SHA-256 digest size in bits — size of each unit of output this class produces
+    static constexpr int byte64                = 64;              // 512 bits (localBufferSize) expressed in bytes — what actually gets fed into SHA256::update()
+    static constexpr int producingIterations   = 512;             // number of hashes emitted after warm-up ends -> 512 * 256 = 131,072 bits in the pool
+    static constexpr int totalIterations       = warmupIterations + producingIterations; // 10,512 — full run length, warm-up + production
+    static constexpr int expectedBits          = producingIterations * total;            // 131,072 bits in bit pool
 
     size_t head         = 0;     // index of the OLDEST live bit in the ring buffer (next to be evicted on write, once full)
     size_t tail         = 0;     // index of the NEXT WRITE position (where the newest bit goes)
