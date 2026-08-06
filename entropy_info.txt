@@ -1,6 +1,0 @@
-Oikos Entropy Generator
-Bits generated: 10000000
-Time (ms): 7126
-Time (s): 7.126
-Throughput (bits/sec): 1.40331e+06
-Throughput (Mbps): 1.40331
