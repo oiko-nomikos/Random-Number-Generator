@@ -1937,7 +1937,8 @@ class RandomNumberGenerator {
             // 512 bits = 2^512 = 64 bytes, which is exactly what SHA-256 expects as input.
             // this is an astronimcally large number of combinations, so the output is effectively "whitened" and conditioned.
             // in scientific notation, 2⁵¹² ≈ 1.34 × 10¹⁵⁴ which is a 155 digit long number so large that it is effectively impossible to brute-force or predict.
-            // we now hash it every time to keep the output stream continuously fed with fresh digests.
+            // we now hash it every time we add a bit to the local buffer, remove the first, add the last etc,.
+            // this keeps the output stream continuously fed with fresh digests due to the avalanche effect of SHA256.
             if (i >= warmupIterations) {
                 result += hashLocalBits();
             }
