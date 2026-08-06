@@ -1,95 +1,59 @@
-# Oikos Entropy Generator
+# Oikos Entropy Generator — v0.1.0
 
-**A from-first-principles, self-contained randomness extractor using CPU timing jitter.**
+**A from-first-principles, self-contained randomness extractor using CPU timing jitter, with a built-in statistical test harness.**
 
-This is an educational C++ (C++23) project that demonstrates how to harvest entropy from **tiny execution-time variations** in a simple loop — without any OS-provided randomness APIs, hardware RNGs, or external cryptographic libraries.
+This is a completed, feature-complete v0.1.0 release. From this point forward, any functional change to the entropy pipeline, the RNG core, or the statistical tooling bumps the version number — v0.1.0 is a fixed, known snapshot of this codebase.
 
-The core innovation is a custom **timing-jitter bit extractor** combined with a **thread-safe entropy pool** and SHA-256 whitening — all built from scratch.
+## What's new in v0.1.0
 
-**This is NOT cryptographically secure randomness - unless of course you trust it!**
-It is a teaching tool to understand entropy collection mechanics.
+- Warm-up period (`warmupBytes` / `warmupIterations`) added ahead of production hashing, so `globalAvg` has converged before any bit that ends up in an output digest is extracted
+- `EntropyAnalyzer` — full byte-frequency distribution report (mean, std deviation, min/max frequency vs. ideal uniform)
+- `TestNIST` — a from-scratch implementation of all 15 tests in the NIST SP 800-22 Rev. 1a Statistical Test Suite, with a live console dashboard
+- Locked, auto-refilling, securely-erased `BinaryEntropyPool`
+- Standalone SHA-256 (NIST FIPS 180-4), no OpenSSL/libcrypto dependency
+- Single-file implementation, C++23, no OS randomness APIs called anywhere in the pipeline
 
-## Features
+## What this release demonstrably does
 
-- Pure software-based entropy source: measures nanosecond-level jitter in a trivial countdown loop
-- Real-time debiasing via running average comparison
-- Fixed-size circular bit buffer (512 bits); once filled, every subsequent iteration re-hashes the buffer contents through SHA-256, producing an overlapping stream of 256-bit whitened outputs
-- On-demand, thread-safe entropy pool (`BinaryEntropyPool`) with a low-watermark auto-refill policy
-- Standalone SHA-256 implementation (no OpenSSL/libcrypto dependency)
-- Configurable output: request any number of bits via `get()`, or arbitrarily large amounts via `getLarge()` (internally chunked)
-- Locked/secure-erased memory for the bit pool (`VirtualLock`/`mlock`, zero-on-erase)
-- Nondeterministic behavior: different runs produce different output due to real-world timing variance
-- Command-line demo that writes raw entropy to `entropy.bin` plus a metadata/throughput report to `entropy_info.txt`
-- Single-file implementation (RNG.cpp) for easy study
+- Produces output that passes the full NIST STS battery across the tests you've run it against — no detected bias, periodicity, or short-range correlation in the sample sizes tested
+- Produces a byte distribution statistically consistent with uniform, per `EntropyAnalyzer`
+- Runs entirely self-contained: no `/dev/urandom`, no `BCryptGenRandom`, no hardware RNG instruction — every bit traces back to measured CPU timing jitter, hashed through a hand-written SHA-256
+- Is now stable enough as a pipeline (warm-up added, underflow bugs fixed, header/body encoding issues resolved) to treat as a real v0.1.0 baseline rather than a moving target
 
-## The Heart of the Project: Custom Randomness Generation
+## What "passes NIST STS" does and doesn't mean
 
-The **primary motivation** for building this entire demo was to create a **completely self-contained randomness system** — no OS APIs, no hardware RNGs, no external dependencies — just pure software extracting entropy from the real world.
+This is worth being precise about, because it's the crux of what this project is and isn't.
 
-### RandomNumberGenerator – The Bit Harvester
+NIST STS checks whether a bit sequence is **statistically distinguishable from random** — that is, whether there's detectable bias, periodicity, or structure in the *output*. It says nothing about whether that output was **unpredictable to an attacker** before it was generated. Those are different properties, and only the second one is what cryptographic security depends on.
 
-This class is the core invention: it turns tiny variations in **CPU execution timing** into usable random bits.
+Concretely: SHA-256 whitening makes almost any input look statistically uniform in its output. A deterministic counter, hashed through SHA-256, would also pass every test in this suite. So passing STS confirms the *whitening stage* is working as designed — it is not evidence about how much real, attacker-unpredictable entropy went in on the other side.
 
-**How it works (step by step):**
+## Status: not production-grade cryptography, and here's specifically why
 
-1. Runs a fixed number of iterations (`totalIterations = 1024`).
-2. In each iteration:
-   - Measures the exact nanosecond duration of a trivial countdown loop (`volatile int x = 10; while (x > 0) x--;`), using a `volatile` counter so the compiler can't optimize the loop away.
-   - Compares the duration to a running global average (`globalSum / count`) computed across all iterations so far.
-   - If shorter than the running average → bit = 0
-     If longer than or equal to the running average → bit = 1
-   (This simple comparison acts as a basic debiasing mechanism.)
-3. Writes the bit into a fixed-size circular buffer of 512 slots (`localBits`), advancing a `tail` index each iteration.
-4. Once the buffer has been written to for the first time all the way around (after the 511th iteration), it's marked `filled`, and **every iteration from then on** — not just once per 512 bits — packs the current buffer into a 64-byte block, feeds it into SHA-256, and appends the 256-bit binary digest to the output.
-5. After all 1024 iterations, `run()` returns one long bit string. Because whitened output is produced on almost every iteration once the buffer fills (roughly `totalIterations - localBufferSize` times), a single `run()` call yields on the order of hundreds of thousands of output bits, even though the underlying entropy is only ever collected from 1024 timing samples.
+This project has not been shown to have sufficient min-entropy or attacker-unpredictability to be relied on for real key material, wallets, transaction signing, or anything securing actual funds or secrets. Specifically:
 
-**Why this is clever / educational:**
-- Demonstrates real entropy extraction from **non-obvious sources** (CPU jitter caused by scheduling, cache, interrupts, etc.).
-- Shows basic debiasing (average comparison) and whitening (hash function).
-- Illustrates how a small, fixed-size internal state can still be turned into a much larger output stream by repeatedly re-hashing it as it's updated — while making clear that this **does not create new entropy**, it just reshapes/stretches what little was harvested.
-- Fully transparent — you can see exactly where randomness comes from.
+- **No min-entropy estimate.** There's no measurement anywhere in the pipeline of how many bits of real unpredictability each timing sample actually contributes before it's folded into the ring buffer. "Passes NIST STS" and "has N bits of min-entropy per sample" are different claims — this project only supports the first one.
+- **CPU timing jitter is a well-studied weak entropy source.** On modern hardware it's shaped by CPU frequency scaling, branch prediction warm-up, thermal throttling, and OS scheduler behavior — several of which are at least partially observable or influenceable by another process on the same machine.
+- **The SHA-256 implementation is hand-written from spec, unaudited, and not constant-time.** Even if functionally correct, it has none of the side-channel hardening or track record of libsodium, OpenSSL, or BoringSSL's implementations — including against timing leaks in the hashing step itself.
+- **No independent third-party audit, no formal security proof, no head-to-head validation against a known-good CSPRNG.**
 
-**Limitations (important!):**
-- Entropy quality is **very low** on modern hardware (timings are often too stable or predictable).
-- Easily influenced by system load, CPU frequency scaling, virtualization, etc.
-- Because the buffer is re-hashed every iteration rather than consumed and reset, most of the underlying jitter bits are reused across many consecutive output blocks — output volume is not the same thing as entropy volume.
-- Not suitable for cryptographic key material — included only for learning.
+This is standard, close-to-universal security guidance, not a hedge specific to this project: don't roll your own crypto for anything that needs to actually hold up against a real attacker. That guidance applies here regardless of how solid the rest of the engineering is.
 
-### BinaryEntropyPool – The On-Demand Bit Reservoir
+## If you want a genuine path to production use
 
-This class manages the bits produced by `RandomNumberGenerator` in a reusable, thread-safe way.
-
-**How it works:**
-
-1. Maintains a growing string `bitPool` of '0'/'1' characters, reserved upfront to `POOL_RESERVED` (200% of one `run()` worth of output) and memory-locked (`VirtualLock` on Windows, `mlock` elsewhere) so it can't be paged to disk.
-2. When someone calls `get(bitsNeeded)`:
-   - If the pool has dropped below `LOW_WATERMARK` (half of `POOL_CAPACITY`), it refills by calling `rng.run()` and appending the result.
-   - Keeps refilling in a loop until the pool has at least `bitsNeeded` bits available.
-   - Extracts exactly `bitsNeeded` bits from the front, then securely erases those bits from the pool (zeroes the memory before erasing) so used bits are never left lingering.
-3. `getLarge(bitsNeeded)` transparently services requests larger than one pool's capacity by looping `get()` in `POOL_CAPACITY`-sized chunks.
-4. `available()` reports the current pool size, and `drain()` securely clears the whole pool and resets its reserved capacity.
-5. Everything is protected by a mutex (`poolMutex`) for thread safety, even though the current demo is single-threaded.
-
-**Why it's useful:**
-- Lazy evaluation: only generates bits when actually needed (e.g., for salt or IV).
-- Acts as a buffer so you don't waste entropy by regenerating on every call.
-- Simple interface: `bep.get(128)` → 128 random bits as a string; `bep.getLarge(1'000'000)` for bulk requests.
-
-**Combined effect:**
-Together, these classes let the entire program generate salts and IVs **without ever calling the OS for randomness** — making the demo 100% self-contained and a nice teaching tool for "how randomness can be harvested from nothing".
+The realistic next step isn't "prove the jitter source is good enough" — it's stop relying on it alone. Mix your jitter-derived bits in as a *supplement* to an OS-provided CSPRNG (`/dev/urandom` on Linux, `BCryptGenRandom` on Windows) rather than as the sole entropy source, e.g. XOR or HKDF-combine them before use. That way even if the jitter source turns out to contribute near-zero real entropy, security still rests on the OS CSPRNG underneath it — and you keep the self-contained jitter harvesting as a legitimate additional input rather than a single point of failure.
 
 ## Architecture
 
-### 1. SystemClock
-High-resolution timing using `std::chrono::high_resolution_clock`, exposed as raw nanoseconds since epoch.
+### 1. `SystemClock`
+High-resolution timing via `std::chrono::high_resolution_clock`, exposed as raw nanoseconds since epoch.
 
-### 2. SHA256 (in `CRYPTO` namespace, to avoid conflicts with OpenSSL headers)
-Independent streaming implementation following NIST FIPS 180-4 — used solely for whitening the raw jitter bits. Exposes `hashBytes`, `hashString`, `hashBinary`, and `hashHex` convenience wrappers, plus incremental `update()`/`digest()` for streaming use.
+### 2. `CRYPTO::SHA256`
+Independent streaming implementation following NIST FIPS 180-4, used to whiten raw jitter bits. Exposes `hashBytes`, `hashString`, `hashBinary`, `hashHex`, plus incremental `update()`/`digest()` for streaming use.
 
-### 3. RandomNumberGenerator — The Core Entropy Harvester
+### 3. `RandomNumberGenerator` — the entropy harvester
 
-**Entropy source**
-Measures execution time of a tiny loop:
+**Entropy source** — nanosecond duration of a trivial busy-wait loop:
 
 ```cpp
 volatile int x = 10;
@@ -101,20 +65,40 @@ while (x > 0) {
 long long duration = systemClock.getNanoseconds() - start;
 ```
 
-### 4. BinaryEntropyPool — The Reservoir
+**Pipeline, per `run()`:**
 
-Wraps `RandomNumberGenerator` behind a locked, auto-refilling, securely-erased bit pool (see above), sized in constants:
+1. **Warm-up** (`warmupIterations` = 10,000): samples run through the same threshold/ring-buffer mechanics as production, letting `globalAvg` converge. The 512-slot ring buffer (`localBits`) fills well before warm-up ends, but nothing is hashed yet.
+2. **Production** (512 further iterations): each timing sample is thresholded against the now-converged `globalAvg` (`bit = duration < globalAvg ? 0 : 1`), written into the ring buffer, and the full 512-bit window is packed into 64 bytes and hashed through SHA-256. Every production iteration emits one 256-bit digest.
+3. One `run()` call therefore emits exactly 512 × 256 = 131,072 bits from 10,512 total timing samples.
 
-- `POOL_CAPACITY` = 512 × 256 = 131,072 bits — one `rng.run()` worth of output
-- `POOL_RESERVED` = `POOL_CAPACITY` × 2 — upfront reservation
+### 4. `BinaryEntropyPool` — the reservoir
+
+Wraps `RandomNumberGenerator` behind a locked, auto-refilling, securely-erased bit pool:
+
+- `POOL_CAPACITY` = 512 × 256 = 131,072 bits — one `run()` worth of output
+- `POOL_RESERVED` = `POOL_CAPACITY` × 2 — upfront reservation, memory-locked via `VirtualLock`/`mlock`
 - `LOW_WATERMARK` = 512 × 128 — refill trigger, halfway through capacity
+- Bits are zeroed and erased from the pool immediately after being handed out, so nothing is reused
+- Thread-safe via `poolMutex`
+
+### 5. `EntropyAnalyzer`
+Feeds generated bits in as bytes and reports the full 256-value frequency distribution, plus mean, standard deviation, and min/max frequency against the ideal uniform expectation.
+
+### 6. `TestNIST`
+Full from-scratch implementation of the 15 tests in NIST SP 800-22 Rev. 1a: Frequency (Monobit), Block Frequency, Runs, Longest Run of Ones, Binary Matrix Rank, DFT (Spectral), Non-Overlapping Template Matching, Overlapping Template Matching, Maurer's Universal, Linear Complexity, Serial, Approximate Entropy, Cumulative Sums, Random Excursions, and Random Excursions Variant. Live console dashboard tracks progress test-by-test.
 
 ## Command-Line Demo
 
-`main()` prompts for a number of bits, pulls that many bits out of the pool via `bep.get(amount)`, and writes:
+`main()` prompts for a number of bits, pulls that many from the pool via `bep.request(amount)`, then:
 
-- **`entropy.bin`** — the raw '0'/'1' bit string (suitable as input to statistical test suites such as NIST's STS)
-- **`entropy_info.txt`** — a small report with bits generated, elapsed time (ms/s), and throughput in bits/sec and Mbps
+- Writes **`entropy.bin`** — the raw '0'/'1' bit string
+- Writes **`entropy_info.txt`** — bits generated, elapsed time (ms/s), throughput (bits/sec, Mbps)
+- Runs `EntropyAnalyzer` and prints the full byte distribution table
+- Runs the full NIST STS battery via `TestNIST` and prints pass/fail, statistic, and p-value for all 15 tests
+
+## Versioning
+
+This README describes **v0.1.0** exactly as it stands. Any change to the RNG core, the entropy pool, the analyzer, or the NIST test implementations from this point forward requires a version bump — v0.1.0 should be treated as a fixed, citable snapshot, not a rolling label.
 
 👤 Author
 
