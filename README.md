@@ -1,135 +1,120 @@
-Oikos Entropy Generator (C++)
+# Oikos Entropy Generator
 
-A from-scratch entropy and random bit generator written in modern C++ (C++23), using high-resolution timing jitter and SHA-256 whitening to produce configurable amounts of binary entropy.
+**A from-first-principles, self-contained randomness extractor using CPU timing jitter.**
 
-This project is intentionally self-contained, with no external crypto or RNG libraries, and is designed as an educational and experimental entropy pipeline rather than a drop-in replacement for OS CSPRNGs.
+This is an educational C++ (C++23) project that demonstrates how to harvest entropy from **tiny execution-time variations** in a simple loop — without any OS-provided randomness APIs, hardware RNGs, or external cryptographic libraries.
 
-✨ Features
+The core innovation is a custom **timing-jitter bit extractor** combined with a **thread-safe entropy pool** and SHA-256 whitening — all built from scratch.
 
-⏱️ Timing-based entropy source
+**This is NOT cryptographically secure randomness - unless of course you trust it!**
+It is a teaching tool to understand entropy collection mechanics.
 
-Uses nanosecond-resolution timing jitter as the raw entropy signal
+## Features
 
-🔐 SHA-256 whitening
+- Pure software-based entropy source: measures nanosecond-level jitter in a trivial countdown loop
+- Real-time debiasing via running average comparison
+- Fixed-size circular bit buffer (512 bits); once filled, every subsequent iteration re-hashes the buffer contents through SHA-256, producing an overlapping stream of 256-bit whitened outputs
+- On-demand, thread-safe entropy pool (`BinaryEntropyPool`) with a low-watermark auto-refill policy
+- Standalone SHA-256 implementation (no OpenSSL/libcrypto dependency)
+- Configurable output: request any number of bits via `get()`, or arbitrarily large amounts via `getLarge()` (internally chunked)
+- Locked/secure-erased memory for the bit pool (`VirtualLock`/`mlock`, zero-on-erase)
+- Nondeterministic behavior: different runs produce different output due to real-world timing variance
+- Command-line demo that writes raw entropy to `entropy.bin` plus a metadata/throughput report to `entropy_info.txt`
+- Single-file implementation (RNG.cpp) for easy study
 
-Custom SHA-256 implementation (no OpenSSL / libsodium)
+## The Heart of the Project: Custom Randomness Generation
 
-Converts noisy entropy into uniformly distributed output
+The **primary motivation** for building this entire demo was to create a **completely self-contained randomness system** — no OS APIs, no hardware RNGs, no external dependencies — just pure software extracting entropy from the real world.
 
-🧠 Sliding window entropy extraction
+### RandomNumberGenerator – The Bit Harvester
 
-512-bit local buffer hashed into 256-bit outputs
+This class is the core invention: it turns tiny variations in **CPU execution timing** into usable random bits.
 
-🧵 Thread-safe entropy pool
+**How it works (step by step):**
 
-std::mutex-protected entropy pool
+1. Runs a fixed number of iterations (`totalIterations = 1024`).
+2. In each iteration:
+   - Measures the exact nanosecond duration of a trivial countdown loop (`volatile int x = 10; while (x > 0) x--;`), using a `volatile` counter so the compiler can't optimize the loop away.
+   - Compares the duration to a running global average (`globalSum / count`) computed across all iterations so far.
+   - If shorter than the running average → bit = 0
+     If longer than or equal to the running average → bit = 1
+   (This simple comparison acts as a basic debiasing mechanism.)
+3. Writes the bit into a fixed-size circular buffer of 512 slots (`localBits`), advancing a `tail` index each iteration.
+4. Once the buffer has been written to for the first time all the way around (after the 511th iteration), it's marked `filled`, and **every iteration from then on** — not just once per 512 bits — packs the current buffer into a 64-byte block, feeds it into SHA-256, and appends the 256-bit binary digest to the output.
+5. After all 1024 iterations, `run()` returns one long bit string. Because whitened output is produced on almost every iteration once the buffer fills (roughly `totalIterations - localBufferSize` times), a single `run()` call yields on the order of hundreds of thousands of output bits, even though the underlying entropy is only ever collected from 1024 timing samples.
 
-Supports concurrent access
+**Why this is clever / educational:**
+- Demonstrates real entropy extraction from **non-obvious sources** (CPU jitter caused by scheduling, cache, interrupts, etc.).
+- Shows basic debiasing (average comparison) and whitening (hash function).
+- Illustrates how a small, fixed-size internal state can still be turned into a much larger output stream by repeatedly re-hashing it as it's updated — while making clear that this **does not create new entropy**, it just reshapes/stretches what little was harvested.
+- Fully transparent — you can see exactly where randomness comes from.
 
-📏 User-configurable entropy size
+**Limitations (important!):**
+- Entropy quality is **very low** on modern hardware (timings are often too stable or predictable).
+- Easily influenced by system load, CPU frequency scaling, virtualization, etc.
+- Because the buffer is re-hashed every iteration rather than consumed and reset, most of the underlying jitter bits are reused across many consecutive output blocks — output volume is not the same thing as entropy volume.
+- Not suitable for cryptographic key material — included only for learning.
 
-Generate any number of bits at runtime
+### BinaryEntropyPool – The On-Demand Bit Reservoir
 
-🧪 Deterministic structure, nondeterministic output
+This class manages the bits produced by `RandomNumberGenerator` in a reusable, thread-safe way.
 
-Same code path, different entropy every run
+**How it works:**
 
-⚠️ Disclaimer
+1. Maintains a growing string `bitPool` of '0'/'1' characters, reserved upfront to `POOL_RESERVED` (200% of one `run()` worth of output) and memory-locked (`VirtualLock` on Windows, `mlock` elsewhere) so it can't be paged to disk.
+2. When someone calls `get(bitsNeeded)`:
+   - If the pool has dropped below `LOW_WATERMARK` (half of `POOL_CAPACITY`), it refills by calling `rng.run()` and appending the result.
+   - Keeps refilling in a loop until the pool has at least `bitsNeeded` bits available.
+   - Extracts exactly `bitsNeeded` bits from the front, then securely erases those bits from the pool (zeroes the memory before erasing) so used bits are never left lingering.
+3. `getLarge(bitsNeeded)` transparently services requests larger than one pool's capacity by looping `get()` in `POOL_CAPACITY`-sized chunks.
+4. `available()` reports the current pool size, and `drain()` securely clears the whole pool and resets its reserved capacity.
+5. Everything is protected by a mutex (`poolMutex`) for thread safety, even though the current demo is single-threaded.
 
-This project is for educational and experimental purposes.
-It is not audited, not certified, and not recommended for production cryptographic use where security guarantees are required. 
+**Why it's useful:**
+- Lazy evaluation: only generates bits when actually needed (e.g., for salt or IV).
+- Acts as a buffer so you don't waste entropy by regenerating on every call.
+- Simple interface: `bep.get(128)` → 128 random bits as a string; `bep.getLarge(1'000'000)` for bulk requests.
 
-If you need cryptographically secure randomness in production, use your OS-provided CSPRNG (e.g. /dev/urandom, CryptGenRandom, getrandom()).
+**Combined effect:**
+Together, these classes let the entire program generate salts and IVs **without ever calling the OS for randomness** — making the demo 100% self-contained and a nice teaching tool for "how randomness can be harvested from nothing".
 
-🧩 Architecture Overview
-1. SystemClock
+## Architecture
 
-Provides high-resolution timestamps (seconds → nanoseconds) used for timing jitter.
+### 1. SystemClock
+High-resolution timing using `std::chrono::high_resolution_clock`, exposed as raw nanoseconds since epoch.
 
-2. SHA256
+### 2. SHA256 (in `CRYPTO` namespace, to avoid conflicts with OpenSSL headers)
+Independent streaming implementation following NIST FIPS 180-4 — used solely for whitening the raw jitter bits. Exposes `hashBytes`, `hashString`, `hashBinary`, and `hashHex` convenience wrappers, plus incremental `update()`/`digest()` for streaming use.
 
-A complete, standalone implementation of SHA-256:
+### 3. RandomNumberGenerator — The Core Entropy Harvester
 
-Supports streaming updates
+**Entropy source**
+Measures execution time of a tiny loop:
 
-Outputs hex or 256-bit binary strings
+```cpp
+volatile int x = 10;
+auto start = systemClock.getNanoseconds();
+while (x > 0) {
+    int tmp = x;
+    x = tmp - 1;
+}
+long long duration = systemClock.getNanoseconds() - start;
+```
 
-Used exclusively for entropy whitening
+### 4. BinaryEntropyPool — The Reservoir
 
-3. RandomNumberGenerator
+Wraps `RandomNumberGenerator` behind a locked, auto-refilling, securely-erased bit pool (see above), sized in constants:
 
-Measures execution-time jitter
+- `POOL_CAPACITY` = 512 × 256 = 131,072 bits — one `rng.run()` worth of output
+- `POOL_RESERVED` = `POOL_CAPACITY` × 2 — upfront reservation
+- `LOW_WATERMARK` = 512 × 128 — refill trigger, halfway through capacity
 
-Converts timing variance into raw bits
+## Command-Line Demo
 
-Maintains a 512-bit sliding window
+`main()` prompts for a number of bits, pulls that many bits out of the pool via `bep.get(amount)`, and writes:
 
-Hashes each window into a 256-bit binary output
-
-4. BinaryEntropyPool
-
-Accumulates entropy from the RNG
-
-Stores entropy as a binary string
-
-Thread-safe via std::mutex
-
-Supplies exactly the number of bits requested
-
-🚀 Usage
-Build (MSYS2 / MinGW example)
-g++ -std=c++23 -Wall -Wextra -pthread RNG.cpp - seen. exe
-
-
-(Adjust paths/compiler as needed.)
-
-Run
-Welcome to Oikos Entropy Generator!
-
-Please enter the amount of entropy you wish to Generate!
-1000
-
-Entropy: 011010100101...
-
-
-The output is a binary string of exactly the requested length.
-
-📦 Example Code
-BinaryEntropyPool bep;
-
-size_t bits = 1024;
-std::string entropy = bep.get(bits);
-
-// entropy.size() == 1024
-
-📈 Performance Notes
-
-Entropy generation speed depends on CPU timing resolution
-
-SHA-256 whitening dominates runtime cost
-
-Larger entropy requests scale linearly
-
-🛠️ Possible Extensions
-
-Hex / Base64 output modes
-
-Entropy estimation metrics
-
-Persistent entropy pool (disk-backed)
-
-UUID / mnemonic / key generation
-
-Multithreaded entropy harvesting
-
-Statistical randomness testing (NIST STS)
-
-📜 License
-
-MIT License
-Copyright © 2026 oiko-nomikos
-
-See the LICENSE file or header comments for full license text.
+- **`entropy.bin`** — the raw '0'/'1' bit string (suitable as input to statistical test suites such as NIST's STS)
+- **`entropy_info.txt`** — a small report with bits generated, elapsed time (ms/s), and throughput in bits/sec and Mbps
 
 👤 Author
 

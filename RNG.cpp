@@ -40,96 +40,47 @@
 //----------------------------------------------------------------------------------
 //----------------------------------------------------------------------------------
 
-//----------------------------------------------------------------------------------
-// Core C++ Input / Output and Strings
-//----------------------------------------------------------------------------------
+// MIT License
 
-#include <fstream>  // std::ifstream, std::ofstream — file input/output
-#include <iostream> // std::cout, std::cin, std::cerr — console input/output
-#include <iomanip>  // std::setw, std::setfill, std::setprecision — formatted output
-#include <string>   // std::string — dynamic string class
-#include <limits>   // std::numeric_limits — type limits and stream utilities
+// Copyright (c) 2026 oiko-nomikos
 
-//----------------------------------------------------------------------------------
-// Containers and Data Structures
-//----------------------------------------------------------------------------------
+// Permission is hereby granted, free of charge, to any person obtaining a copy
+// of this software and associated documentation files (the "Software"), to deal
+// in the Software without restriction, including without limitation the rights
+// to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+// copies of the Software, and to permit persons to whom the Software is
+// furnished to do so, subject to the following conditions:
 
-#include <vector> // std::vector — dynamic contiguous array
-#include <deque>  // std::deque — double-ended queue
-#include <array>  // std::array — fixed-size array
-#include <bitset> // std::bitset — fixed-size bit manipulation
+// The above copyright notice and this permission notice shall be included in all
+// copies or substantial portions of the Software.
 
-//----------------------------------------------------------------------------------
-// Algorithms
-//----------------------------------------------------------------------------------
-
-#include <algorithm> // std::sort, std::max, std::min, std::clamp, std::swap, etc.
-
-//----------------------------------------------------------------------------------
-// Mathematics
-//----------------------------------------------------------------------------------
-
-#include <cmath>   // std::sqrt, std::pow, std::log, std::exp, std::erfc, etc.
-#include <complex> // std::complex — complex numbers (used by FFT/DFT)
-#include <random>  // Random number engines and statistical distributions
-
-//----------------------------------------------------------------------------------
-// Timing
-//----------------------------------------------------------------------------------
-
-#include <chrono> // std::chrono — clocks, durations, and timing utilities
-
-//----------------------------------------------------------------------------------
-// Thread Synchronisation
-//----------------------------------------------------------------------------------
-
-#include <mutex> // std::mutex, std::lock_guard, std::unique_lock
-
-//----------------------------------------------------------------------------------
-// Windows API
-//----------------------------------------------------------------------------------
-
-#define WIN32_LEAN_AND_MEAN // Exclude rarely used Windows headers to reduce compile time
-#include <windows.h>        // Windows API (VirtualLock, VirtualUnlock, Sleep, etc.)
-
-//----------------------------------------------------------------------------------
-// Global Type Aliases
-//----------------------------------------------------------------------------------
-
-using Bytes    = std::vector<uint8_t>; // Convenience alias for a byte buffer
-using Matrix32 = std::array<std::bitset<32>, 32>;
-
-//----------------------------------------------------------------------------------
-// Macros: Version
-//----------------------------------------------------------------------------------
-
-#define CSPRNG_VERSION "v0.1.0"
-
-//----------------------------------------------------------------------------------
-// Windows Specific Utilities
-//----------------------------------------------------------------------------------
-
-void maximizeConsoleWindow() {
-#ifdef _WIN32
-    HWND consoleWindow = GetConsoleWindow();
-
-    if (consoleWindow != nullptr) {
-        ShowWindow(consoleWindow, SW_MAXIMIZE);
-    }
-#endif
-}
+// THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+// IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+// FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+// AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+// LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+// OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+// SOFTWARE.
 
 //----------------------------------------------------------------------------------
 //----------------------------------------------------------------------------------
 //----------------------------------------------------------------------------------
 
-class SystemClock {
-  public:
-    inline long long getNanoseconds() {
-        auto now = std::chrono::high_resolution_clock::now();
-        return std::chrono::duration_cast<std::chrono::nanoseconds>(now.time_since_epoch()).count();
-    }
-};
+// === Core C++ Input/Output and Strings ===
+#include <fstream>  // std::ifstream, std::ofstream — file I/O
+#include <iostream> // std::cout, std::cin — console I/O
+#include <string>   // std::string — string handling
+#include <iomanip>  // std::setw, std::setprecision — formatted output
+
+// === Containers and Data Structures ===
+#include <vector> // std::vector — dynamic arrays
+#include <deque>  // std::deque — double-ended queues (used for entropy pools)
+
+// === Timing and Delays ===
+#include <chrono> // std::chrono::high_resolution_clock — precise timing
+
+// === Multithreading and Synchronization ===
+#include <mutex> // std::mutex — mutual exclusion
 
 //----------------------------------------------------------------------------------
 //----------------------------------------------------------------------------------

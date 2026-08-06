@@ -36,3 +36,10 @@ AlignOperands: Align
 BreakBeforeBinaryOperators: NonAssignment
 
 AllowShortCaseLabelsOnASingleLine: false
+
+# Alignment
+AlignConsecutiveAssignments: true
+AlignOperands: Align
+BreakBeforeBinaryOperators: NonAssignment
+
+AllowShortCaseLabelsOnASingleLine: false
