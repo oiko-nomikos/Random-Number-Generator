@@ -3,6 +3,14 @@
 //----------------------------------------------------------------------------------
 //----------------------------------------------------------------------------------
 //
+// Oikos Random Number Generator
+// Copyright (c) 2026 oiko-nomikos
+//
+// Licensed under the MIT License.
+// SPDX-License-Identifier: MIT
+//
+// See the LICENSE file in the project root for the full license text.
+//
 // =================================================================================
 //
 // IMPORTANT SECURITY & LEGAL NOTICES
